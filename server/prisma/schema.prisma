@@ -1,0 +1,99 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  username  String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  
+  hostedRooms Room[] @relation("Host")
+  memberOf    RoomMember[]
+  playlists   Playlist[]
+  likedTracks LikedTrack[]
+}
+
+model Room {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  hostId    String
+  host      User     @relation("Host", fields: [hostId], references: [id])
+  
+  isPlaying     Boolean @default(false)
+  currentTrackId String?
+  position      Int     @default(0) // in milliseconds
+  updatedAt     DateTime @updatedAt
+
+  members RoomMember[]
+  queue   RoomQueue[]
+}
+
+model RoomMember {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id])
+  joinedAt  DateTime @default(now())
+}
+
+model Track {
+  id          String   @id @default(uuid())
+  pipedId     String   @unique // The ID from Piped/YouTube
+  title       String
+  artist      String
+  album       String?
+  thumbnailUrl String?
+  duration    Int      // in seconds
+
+  playlists PlaylistTrack[]
+  queues    RoomQueue[]
+  likedBy   LikedTrack[]
+}
+
+model LikedTrack {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  trackId   String
+  track     Track    @relation(fields: [trackId], references: [id])
+  likedAt   DateTime @default(now())
+
+  @@unique([userId, trackId])
+}
+
+model Playlist {
+  id        String   @id @default(uuid())
+  name      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  tracks    PlaylistTrack[]
+}
+
+model PlaylistTrack {
+  id         String   @id @default(uuid())
+  playlistId String
+  playlist   Playlist @relation(fields: [playlistId], references: [id])
+  trackId    String
+  track      Track    @relation(fields: [trackId], references: [id])
+  order      Int
+}
+
+model RoomQueue {
+  id        String   @id @default(uuid())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id])
+  trackId   String
+  track     Track    @relation(fields: [trackId], references: [id])
+  order     Int
+  addedBy   String? // userId
+  isPlayed  Boolean @default(false)
+}
