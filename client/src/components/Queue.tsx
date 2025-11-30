@@ -2,6 +2,7 @@ import { usePlayerStore } from '../store/usePlayerStore';
 import { X, Trash2, Play, History, ListMusic } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import toast from 'react-hot-toast';
+import { useShallow } from 'zustand/react/shallow';
 
 interface QueueProps {
     isOpen: boolean;
@@ -9,14 +10,22 @@ interface QueueProps {
 }
 
 export const Queue = ({ isOpen, onClose }: QueueProps) => {
-    const { queue, playTrack, removeFromQueue, clearQueue, currentTrack } = usePlayerStore();
+    const { playTrack, playTrackFromQueue, removeFromQueue, clearQueue, currentTrack } = usePlayerStore();
+    const queue = usePlayerStore(
+        useShallow(state => [...state.queueExplicit, ...state.queueSystem, ...state.queueAI])
+    );
     const { socket } = useAuthStore();
     const roomCode = location.pathname.startsWith('/rooms/') ? location.pathname.split('/')[2] : null;
 
     if (!isOpen) return null;
 
-    const handlePlay = (track: any) => {
-        playTrack(track);
+    const handlePlay = (track: any, isQueueItem = false) => {
+        if (isQueueItem) {
+            playTrackFromQueue(track.pipedId || track.id);
+        } else {
+            playTrack(track);
+        }
+
         if (roomCode && socket) {
             socket.emit('play', { roomCode, track, position: 0 });
         }

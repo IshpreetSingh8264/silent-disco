@@ -140,100 +140,156 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
             seedTrackId: z.string(),
             seedTrackTitle: z.string().optional(),
             seedTrackArtist: z.string().optional(),
+            historyIds: z.string().optional(), // Comma-separated list of last played track IDs
             limit: z.string().optional().transform(Number)
         });
 
-        const { seedTrackId, seedTrackTitle, seedTrackArtist, limit = 10 } = schema.parse(request.query);
-        const cacheKey = `recommendations:${seedTrackId}:v2`; // Versioned cache key
+        const { seedTrackId, seedTrackTitle, seedTrackArtist, historyIds, limit = 20 } = schema.parse(request.query);
+        const cacheKey = `recommendations:${seedTrackId}:${historyIds || 'none'}:v5`;
 
         try {
             const cached = await redis.get(cacheKey);
             if (cached) return JSON.parse(cached);
 
-            // Smart Search Strategy
-            // 1. Search for "Song Title" (finds the song and related covers/remixes/similar)
-            // 2. Search for "Artist Name" (finds top songs by artist)
-            // 3. Mix results
+            let validSongs: any[] = [];
+            const historyList = historyIds ? historyIds.split(',') : [];
 
-            const queries = [];
-            if (seedTrackTitle) queries.push(seedTrackTitle);
-            if (seedTrackArtist) queries.push(`${seedTrackArtist} top songs`);
-            if (queries.length === 0) queries.push('trending music');
+            // Try Python AI Engine first (via CLI)
+            try {
+                const pythonScriptPath = path.join(process.cwd(), 'ai', 'recommend.py');
+                const pythonProcess = spawn('python', [pythonScriptPath]);
 
-            const results = await Promise.all(queries.map(q => ytmusic.search(q)));
+                const inputData = JSON.stringify({
+                    userId: request.user?.userId || 'anonymous',
+                    context: 'radio',
+                    recentHistory: [seedTrackId, ...historyList],
+                    limit: limit
+                });
 
-            // Flatten and deduplicate
-            const allSongs = results.flat();
-            const uniqueSongs = new Map();
+                let stdoutData = '';
+                let stderrData = '';
 
-            allSongs.forEach((item: any) => {
-                if (item.videoId && item.videoId !== seedTrackId && !uniqueSongs.has(item.videoId)) {
-                    uniqueSongs.set(item.videoId, item);
+                const aiPromise = new Promise<any>((resolve, reject) => {
+                    pythonProcess.stdout.on('data', (data) => {
+                        stdoutData += data.toString();
+                    });
+
+                    pythonProcess.stderr.on('data', (data) => {
+                        stderrData += data.toString();
+                    });
+
+                    pythonProcess.on('close', (code) => {
+                        if (code === 0) {
+                            try {
+                                resolve(JSON.parse(stdoutData));
+                            } catch (e) {
+                                reject(new Error(`Failed to parse Python output: ${e}`));
+                            }
+                        } else {
+                            reject(new Error(`Python script exited with code ${code}: ${stderrData}`));
+                        }
+                    });
+
+                    pythonProcess.on('error', (err) => {
+                        reject(err);
+                    });
+
+                    // Write input to stdin
+                    pythonProcess.stdin.write(inputData);
+                    pythonProcess.stdin.end();
+                });
+
+                const aiData = await aiPromise;
+
+                if (aiData.recommendations && aiData.recommendations.length > 0) {
+                    validSongs = aiData.recommendations.map((item: any) => ({
+                        url: `/api/music/streams/${item.pipedId}`,
+                        title: item.title,
+                        thumbnail: item.thumbnail,
+                        uploaderName: item.uploaderName,
+                        duration: typeof item.duration === 'string' ? parseDuration(item.duration) : item.duration,
+                        pipedId: item.pipedId
+                    }));
+                    console.log(`[Recommendations] AI Engine returned ${validSongs.length} tracks`);
                 }
-            });
+            } catch (err) {
+                console.warn('[Recommendations] AI Engine unavailable, falling back to local logic', err);
+            }
 
-            // Shuffle/Interleave strategy could be better, but for now let's just take unique ones
-            // Prioritize the first query's results (related to title)
-            const validSongs = Array.from(uniqueSongs.values()).map(mapItem);
+            // Fallback to local logic if AI failed or returned nothing
+            if (validSongs.length === 0) {
+                try {
+                    // Primary strategy: Native "Up Next"
+                    const upNext = await ytmusic.getUpNexts(seedTrackId);
+                    validSongs = upNext
+                        .filter((item: any) => item.videoId && item.videoId !== seedTrackId && !historyList.includes(item.videoId))
+                        .map((item: any) => ({
+                            url: `/api/music/streams/${item.videoId}`,
+                            title: item.title,
+                            thumbnail: item.thumbnail || '',
+                            uploaderName: Array.isArray(item.artists) ? item.artists.map((a: any) => a.name).join(', ') : (item.artist?.name || 'Unknown Artist'),
+                            duration: parseDuration(item.duration),
+                            pipedId: item.videoId
+                        }));
+                } catch (err) {
+                    console.warn(`[Recommendations] getUpNexts failed for ${seedTrackId}, falling back to search`, err);
+                }
+            }
 
-            // Randomize slightly to avoid same order every time if cached? 
-            // No, cache is static. But we can shuffle before slicing.
-            // For "Radio" feel, we want relevance.
+            // "Vibe" Injection: If we have history, fetch related tracks for the previous track too
+            if (historyList.length > 0 && validSongs.length < (limit || 20)) {
+                try {
+                    const lastTrackId = historyList[0]; // Most recent history item
+                    const secondaryRecs = await ytmusic.getUpNexts(lastTrackId);
+                    const secondarySongs = secondaryRecs
+                        .filter((item: any) => item.videoId && item.videoId !== seedTrackId && !historyList.includes(item.videoId))
+                        .map((item: any) => ({
+                            url: `/api/music/streams/${item.videoId}`,
+                            title: item.title,
+                            thumbnail: item.thumbnail || '',
+                            uploaderName: Array.isArray(item.artists) ? item.artists.map((a: any) => a.name).join(', ') : (item.artist?.name || 'Unknown Artist'),
+                            duration: parseDuration(item.duration),
+                            pipedId: item.videoId
+                        }));
 
-            const items = validSongs.slice(0, limit || 10);
+                    // Interleave results: 2 from primary, 1 from secondary
+                    const combined: any[] = [];
+                    let p = 0, s = 0;
+                    while (p < validSongs.length || s < secondarySongs.length) {
+                        if (p < validSongs.length) combined.push(validSongs[p++]);
+                        if (p < validSongs.length) combined.push(validSongs[p++]);
+                        if (s < secondarySongs.length) combined.push(secondarySongs[s++]);
+                    }
+                    validSongs = combined;
+                } catch (err) {
+                    console.warn(`[Recommendations] Secondary fetch failed`, err);
+                }
+            }
 
-            await redis.set(cacheKey, JSON.stringify(items), 3600);
+            // Fallback strategy: Search
+            if (validSongs.length === 0) {
+                const query = seedTrackTitle ? `Songs similar to ${seedTrackTitle} ${seedTrackArtist || ''}` : 'Trending music';
+                const searchResults = await ytmusic.search(query);
+                validSongs = searchResults
+                    .filter((item: any) => item.videoId && item.videoId !== seedTrackId)
+                    .map(mapItem);
+            }
+
+            // Remove duplicates
+            const uniqueSongs = Array.from(new Map(validSongs.map(item => [item.pipedId, item])).values());
+            const items = uniqueSongs.slice(0, limit || 20);
+
+            if (items.length > 0) {
+                await redis.set(cacheKey, JSON.stringify(items), 3600);
+            }
+
             return items;
         } catch (error) {
             server.log.error(error);
             return reply.status(500).send({ error: 'Failed to fetch recommendations' });
         }
     });
-    server.get('/home', async (request, reply) => {
-        const cacheKey = 'home:shelves';
-        try {
-            const cached = await redis.get(cacheKey);
-            if (cached) return JSON.parse(cached);
 
-            // Define shelves to fetch
-            const shelvesConfig = [
-                { title: 'Quick Picks', query: 'Mixed Pop Rock Hits' },
-                { title: 'Trending Now', query: 'Top 50 Global' },
-                { title: 'New Releases', query: 'New Music 2024' },
-                { title: 'Forgotten Favorites', query: '2010s Top Hits' },
-                { title: 'Hip Hop Essentials', query: 'Hip Hop Hits' },
-                { title: 'Indie Vibes', query: 'Indie Pop' }
-            ];
-
-            // Fetch all shelves in parallel
-            const shelvesData = await Promise.all(shelvesConfig.map(async (shelf) => {
-                try {
-                    const songs = await ytmusic.search(shelf.query);
-                    const validSongs = songs
-                        .filter((item: any) => item.videoId)
-                        .slice(0, 10) // Limit to 10 items per shelf
-                        .map(mapItem);
-
-                    return {
-                        title: shelf.title,
-                        items: validSongs
-                    };
-                } catch (e) {
-                    console.error(`Failed to fetch shelf: ${shelf.title}`, e);
-                    return null;
-                }
-            }));
-
-            const validShelves = shelvesData.filter(s => s && s.items.length > 0);
-
-            await redis.set(cacheKey, JSON.stringify(validShelves), 3600); // Cache for 1 hour
-            return validShelves;
-
-        } catch (error) {
-            server.log.error(error);
-            return reply.status(500).send({ error: 'Failed to fetch home data' });
-        }
-    });
 };
 
 export default musicRoutes;

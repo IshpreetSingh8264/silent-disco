@@ -18,6 +18,15 @@ model User {
   memberOf    RoomMember[]
   playlists   Playlist[]
   likedTracks LikedTrack[]
+  history     ListeningHistory[]
+  friends     Friendship[] @relation("UserFriends")
+  friendOf    Friendship[] @relation("FriendUsers")
+  signals     UserSignal[]
+  contextLogs ContextLog[]
+  
+  // Enterprise Stats & Queue
+  userQueue   UserQueue[]
+  trackStats  UserTrackStats[]
 }
 
 model Room {
@@ -57,6 +66,15 @@ model Track {
   playlists PlaylistTrack[]
   queues    RoomQueue[]
   likedBy   LikedTrack[]
+  history   ListeningHistory[]
+  signals   UserSignal[]
+  features  TrackFeature?
+  
+  // Enterprise Stats & Queue
+  globalPlayCount Int @default(0)
+  userStats       UserTrackStats[]
+  regionStats     TrackRegionStats[]
+  userQueues      UserQueue[]
 }
 
 model LikedTrack {
@@ -96,4 +114,126 @@ model RoomQueue {
   order     Int
   addedBy   String? // userId
   isPlayed  Boolean @default(false)
+}
+
+model ListeningHistory {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  trackId   String
+  track     Track    @relation(fields: [trackId], references: [id])
+  playedAt  DateTime @default(now())
+  durationPlayed Int? // Duration played in seconds
+  context   String?  // e.g., "playlist", "search", "radio"
+
+  @@index([userId, playedAt])
+}
+
+model Friendship {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation("UserFriends", fields: [userId], references: [id])
+  friendId  String
+  friend    User     @relation("FriendUsers", fields: [friendId], references: [id])
+  status    String   @default("PENDING") // PENDING, ACCEPTED, BLOCKED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, friendId])
+}
+
+model UserSignal {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  trackId   String
+  track     Track    @relation(fields: [trackId], references: [id])
+  type      String   // SKIP, LIKE, DWELL, VOLUME, CLICK, SEARCH, etc.
+  value     Float?   // e.g., dwell time in seconds, volume level, rating
+  metadata  Json?    // Extra context (device, location, etc.)
+  createdAt DateTime @default(now())
+
+  @@index([userId, type])
+  @@index([trackId])
+}
+
+model TrackFeature {
+  id        String   @id @default(uuid())
+  trackId   String   @unique
+  track     Track    @relation(fields: [trackId], references: [id])
+  
+  // Audio Features
+  bpm            Float?
+  energy         Float?
+  danceability   Float?
+  acousticness   Float?
+  instrumentalness Float?
+  valence        Float? // Mood
+  
+  // Metadata Features
+  genres         String[]
+  moods          String[]
+  instruments    String[]
+  
+  // Computed Features
+  embedding      Json? // Vector embedding (list of floats)
+  
+  updatedAt      DateTime @updatedAt
+}
+
+model ContextLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  timestamp DateTime @default(now())
+  
+  // Context Signals
+  locationType String? // home, office, gym
+  deviceType   String? // mobile, desktop
+  networkType  String? // wifi, 4g
+  timeOfDay    String? // morning, night
+  dayOfWeek    String? // monday, sunday
+  weather      String? // sunny, rainy (future)
+  
+  metadata     Json?
+}
+
+model UserQueue {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  trackId   String
+  track     Track    @relation(fields: [trackId], references: [id])
+  position  Float    // For easy reordering (lexicographical or float-based)
+  source    String   // MANUAL, SYSTEM, AI
+  createdAt DateTime @default(now())
+
+  @@index([userId, position])
+}
+
+model UserTrackStats {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  trackId      String
+  track        Track    @relation(fields: [trackId], references: [id])
+  playCount    Int      @default(0)
+  skipCount    Int      @default(0)
+  lastPlayedAt DateTime @default(now())
+
+  @@unique([userId, trackId])
+  @@index([userId, playCount(sort: Desc)]) // Fast "Top Tracks"
+}
+
+model TrackRegionStats {
+  id            String   @id @default(uuid())
+  trackId       String
+  track         Track    @relation(fields: [trackId], references: [id])
+  countryCode   String
+  playCount     Int      @default(0)
+  trendingScore Float    @default(0)
+  updatedAt     DateTime @updatedAt
+
+  @@unique([trackId, countryCode])
+  @@index([countryCode, trendingScore(sort: Desc)])
 }

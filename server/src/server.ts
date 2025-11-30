@@ -28,14 +28,21 @@ import { authenticate } from './middleware/auth';
 import musicRoutes from './routes/music';
 import roomRoutes from './routes/room';
 import libraryRoutes from './routes/library';
+import userRoutes from './routes/user';
+import homeRoutes from './routes/home';
 import { setupRoomHandlers } from './socket/roomHandler';
+
+// ... (existing code)
 
 fastify.register(prismaPlugin);
 fastify.decorate('authenticate', authenticate);
 fastify.register(authRoutes, { prefix: '/api/auth' });
+
 fastify.register(musicRoutes, { prefix: '/api/music' });
 fastify.register(roomRoutes, { prefix: '/api/rooms' });
 fastify.register(libraryRoutes, { prefix: '/api/library' });
+fastify.register(userRoutes, { prefix: '/api/user' });
+fastify.register(homeRoutes, { prefix: '/api/music' }); // Register under /api/music/home
 
 // We'll use socket.io for real-time, but keeping websocket plugin just in case
 // fastify.register(websocket);

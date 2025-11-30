@@ -8,7 +8,7 @@ export const PlaylistDetail = () => {
     const { id } = useParams();
     const location = useLocation();
     const { token } = useAuthStore();
-    const { playTrack, addToQueue } = usePlayerStore();
+    const { playPlaylist } = usePlayerStore();
     const [tracks, setTracks] = useState<Track[]>([]);
     const [title, setTitle] = useState('');
     const isLiked = location.pathname === '/library/liked';
@@ -52,8 +52,7 @@ export const PlaylistDetail = () => {
 
     const playAll = () => {
         if (tracks.length > 0) {
-            playTrack(tracks[0]);
-            tracks.slice(1).forEach(t => addToQueue(t));
+            playPlaylist(tracks);
         }
     };
 
@@ -141,7 +140,7 @@ export const PlaylistDetail = () => {
                             <tr
                                 key={track.id}
                                 className="group hover:bg-white/5 transition-colors cursor-pointer rounded-lg"
-                                onClick={() => playTrack(track)}
+                                onClick={() => playPlaylist(tracks, i)}
                             >
                                 <td className="py-3 pl-2 text-gray-400 group-hover:text-white font-mono">{i + 1}</td>
                                 <td className="py-3">

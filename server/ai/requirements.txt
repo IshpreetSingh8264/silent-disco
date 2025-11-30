@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pandas
+numpy
+scikit-learn
+ytmusicapi
+python-dotenv
+requests
+pydantic

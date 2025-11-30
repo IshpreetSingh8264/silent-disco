@@ -1,11 +1,21 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import { useLocation } from 'react-router-dom';
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Maximize2, Heart, ListMusic, Shuffle } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { usePlayerStore } from '../store/usePlayerStore';
 import { Queue } from './Queue';
+import { AddToPlaylistModal } from './modals/AddToPlaylistModal';
 
 export const Player = () => {
-    const { currentTrack, isPlaying, togglePlay, playTrack, queue, removeFromQueue, addToQueue, isShuffle, toggleShuffle } = usePlayerStore();
+    const {
+        currentTrack, isPlaying, togglePlay, playTrack,
+        isShuffle, toggleShuffle,
+        playNext, playPrevious, checkSmartQueue
+    } = usePlayerStore();
+
+    const queue = usePlayerStore(useShallow(state => [...state.queueExplicit, ...state.queueSystem, ...state.queueAI]));
+
     const [volume, setVolume] = useState(0.8);
     const [muted, setMuted] = useState(false);
     const [played, setPlayed] = useState(0);
@@ -13,10 +23,12 @@ export const Player = () => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [isQueueOpen, setIsQueueOpen] = useState(false);
     const [activeTab, setActiveTab] = useState('up next');
+    const [showAddToPlaylist, setShowAddToPlaylist] = useState(false);
 
     const { token, socket } = useAuthStore();
     const [isLiked, setIsLiked] = useState(false);
     const audioRef = useRef<HTMLAudioElement>(null);
+    const location = useLocation();
 
     // Check if in a room
     const roomCode = location.pathname.startsWith('/rooms/') ? location.pathname.split('/')[2] : null;
@@ -24,8 +36,12 @@ export const Player = () => {
     useEffect(() => {
         if (currentTrack) {
             checkIfLiked();
+            // Trigger smart queue check whenever track changes
+            if (!roomCode) {
+                checkSmartQueue();
+            }
         }
-    }, [currentTrack]);
+    }, [currentTrack, roomCode]);
 
     useEffect(() => {
         if (audioRef.current) {
@@ -72,65 +88,22 @@ export const Player = () => {
         }
     };
 
-    // Local Smart Queue Effect
-    useEffect(() => {
-        const checkLocalQueue = async () => {
-            // Keep at least 5 songs in queue
-            if (!roomCode && currentTrack && queue.length < 5) {
-                console.log('[SmartQueue] Local queue low, fetching recommendations...');
-                try {
-                    const artist = currentTrack.uploaderName || ''; // Assuming uploaderName is artist
-                    const res = await fetch(`/api/music/recommendations?seedTrackId=${currentTrack.pipedId}&seedTrackTitle=${encodeURIComponent(currentTrack.title)}&seedTrackArtist=${encodeURIComponent(artist)}&limit=10`);
-                    const recommendations = await res.json();
-
-                    // Filter out duplicates (check against current queue AND history if we had it, but for now just queue)
-                    const newTracks = recommendations.filter((rec: any) =>
-                        rec.pipedId !== currentTrack.pipedId &&
-                        !queue.some(q => q.pipedId === rec.pipedId)
-                    );
-
-                    if (newTracks.length > 0) {
-                        // Add up to 10
-                        newTracks.forEach((track: any) => {
-                            addToQueue({ ...track, id: track.pipedId });
-                        });
-                        console.log(`[SmartQueue] Added ${newTracks.length} tracks locally`);
-                    }
-                } catch (err) {
-                    console.error('[SmartQueue] Failed to fetch recommendations', err);
+    const handlePlayNext = () => {
+        if (roomCode && socket) {
+            // Room logic remains manual for now as it involves socket
+            if (queue.length > 0) {
+                let nextTrackIndex = 0;
+                if (isShuffle) {
+                    nextTrackIndex = Math.floor(Math.random() * queue.length);
                 }
-            }
-        };
-
-        checkLocalQueue();
-    }, [queue.length, currentTrack, roomCode]);
-
-    const playNext = () => {
-        if (queue.length > 0) {
-            let nextTrackIndex = 0;
-
-            if (isShuffle) {
-                nextTrackIndex = Math.floor(Math.random() * queue.length);
-            }
-
-            const nextTrack = queue[nextTrackIndex];
-
-            if (roomCode && socket) {
-                // ... (keep existing room logic)
+                const nextTrack = queue[nextTrackIndex];
                 if ((nextTrack as any).queueId) {
                     socket.emit('queue_remove', { roomCode, queueId: (nextTrack as any).queueId });
                 }
                 socket.emit('play', { roomCode, track: nextTrack, position: 0 });
-            } else {
-                // Local playback
-                playTrack(nextTrack);
-                // Remove the specific played instance
-                // If shuffle, we still remove it? Yes, usually.
-                removeFromQueue((nextTrack as any).queueId || nextTrack.id);
             }
         } else {
-            // No next track, maybe stop or loop?
-            if (isPlaying) togglePlay();
+            playNext();
         }
     };
 
@@ -169,7 +142,7 @@ export const Player = () => {
                     ref={audioRef}
                     src={currentTrack.url}
                     onTimeUpdate={handleTimeUpdate}
-                    onEnded={playNext}
+                    onEnded={handlePlayNext}
                     onLoadedMetadata={(e) => {
                         console.log("Audio loaded:", e.currentTarget.src);
                         if (isPlaying) e.currentTarget.play().catch(console.error);
@@ -193,7 +166,12 @@ export const Player = () => {
                                 <button onClick={toggleLike} className="p-4 rounded-full bg-white/5 hover:bg-white/10 transition-colors">
                                     <Heart size={24} fill={isLiked ? "white" : "none"} className={isLiked ? "text-retro-primary" : "text-white"} />
                                 </button>
-                                {/* Add more action buttons here (Share, Add to Playlist, etc.) */}
+                                <button
+                                    onClick={() => setShowAddToPlaylist(true)}
+                                    className="p-4 rounded-full bg-white/5 hover:bg-white/10 transition-colors"
+                                >
+                                    <ListMusic size={24} className="text-white" />
+                                </button>
                             </div>
                         </div>
 
@@ -281,7 +259,10 @@ export const Player = () => {
                             >
                                 <Shuffle size={18} />
                             </button>
-                            <button className="text-gray-400 hover:text-white transition-colors">
+                            <button
+                                onClick={playPrevious}
+                                className="text-gray-400 hover:text-white transition-colors"
+                            >
                                 <SkipBack size={20} />
                             </button>
                             <button
@@ -291,7 +272,7 @@ export const Player = () => {
                                 {isPlaying ? <Pause size={20} fill="black" /> : <Play size={20} fill="black" className="ml-1" />}
                             </button>
                             <button
-                                onClick={playNext}
+                                onClick={handlePlayNext}
                                 className="text-gray-400 hover:text-white transition-colors"
                             >
                                 <SkipForward size={20} />
@@ -344,6 +325,9 @@ export const Player = () => {
             </div>
 
             <Queue isOpen={isQueueOpen} onClose={() => setIsQueueOpen(false)} />
+            {showAddToPlaylist && currentTrack && (
+                <AddToPlaylistModal track={currentTrack} onClose={() => setShowAddToPlaylist(false)} />
+            )}
         </>
     );
 };
