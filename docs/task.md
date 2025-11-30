@@ -1,0 +1,84 @@
+# Task: Build "Silent Disco" - Sync Music Application
+
+- [ ] Planning & Architecture <!-- id: 0 -->
+    - [ ] Define Tech Stack & Architecture in `implementation_plan.md` <!-- id: 1 -->
+    - [x] Create Project Structure (Monorepo: `client` + `server`) <!-- id: 2 -->
+    - [x] Setup Docker Compose (PostgreSQL) <!-- id: 25 -->
+- [ ] Backend Implementation (Node.js + TypeScript) <!-- id: 3 -->
+    - [x] Initialize Node.js Project & Install Dependencies (Fastify, Prisma) <!-- id: 4 -->
+    - [x] Setup TypeScript Config & ESLint <!-- id: 26 -->
+    - [x] Initialize Prisma & Define Schema (PostgreSQL) <!-- id: 27 -->
+    - [x] Implement Auth System (JWT, Email/Password) <!-- id: 28 -->
+    - [x] Implement WebSocket Gateway (Socket.io/ws) for Group Sync <!-- id: 6 -->
+    - [x] Implement Music Data API (Direct YouTube Integration) <!-- id: 8 -->
+    - [x] Implement User Library API (Playlists, Liked Songs) <!-- id: 29 -->
+    - [x] Implement Room/Group Management Logic <!-- id: 7 -->
+- [ ] Frontend Implementation (React) <!-- id: 9 -->
+    - [x] Initialize Vite + React + Tailwind <!-- id: 10 -->
+    - [ ] Setup Zustand Store (Auth, Player, Library, Socket) <!-- id: 11 -->
+    - [/] Configure Tailwind for "Retro Dark" Theme <!-- id: 12 -->
+    - [x] Build Layout (Sidebar, Player Bar, Navigation) <!-- id: 30 -->
+    - [x] Build Home/Dashboard (Recommendations) <!-- id: 31 -->
+    - [x] Build Search Interface (Tracks, Artists, Albums) <!-- id: 32 -->
+    - [x] Build Library & Playlist Management <!-- id: 33 -->
+    - [x] Implement "Add to Playlist" from Search <!-- id: 35 -->
+    - [ ] Build Artist & Album Detail Pages <!-- id: 34 -->
+    - [x] Build Music Player (Visualizer, Lyrics, Queue) <!-- id: 14 -->
+    - [x] Build Group/Room Interface (Invite, Member List) <!-- id: 15 -->
+    - [ ] Integrate Framer Motion Animations <!-- id: 16 -->
+- [ ] Integration & Polish <!-- id: 17 -->
+    - [x] Connect Frontend to Backend API & WebSocket <!-- id: 18 -->
+    - [x] Implement Robust Sync Logic (Latency Compensation) <!-- id: 19 -->
+    - [x] Final UI Polish (Retro aesthetics, Responsive Design) <!-- id: 21 -->
+- [ ] Verification <!-- id: 22 -->
+    - [x] Manual Test: Full User Flow (Signup -> Search -> Play -> Group) <!-- id: 23 -->
+    - [x] Manual Test: Playlist/Library Management <!-- id: 6 -->
+    - [x] Debug Music Playback & Rendering
+        - [x] Fix duplicate keys in trending list
+        - [x] Implement direct audio streaming (yt-dlp)
+        - [x] Fix "0:00" duration display
+        - [x] Fix seek/playback errors
+        - [x] Configure proxy for reliable networking
+- [ ] Production Readiness <!-- id: 36 -->
+    - [x] Infrastructure: Add Redis to Docker Compose <!-- id: 37 -->
+    - [x] Backend: Implement Redis Caching Service <!-- id: 38 -->
+    - [x] Backend: Update RoomQueue Schema (isPlayed) <!-- id: 39 -->
+    - [x] Backend: Implement Smart Queue (Auto-Add Recommendations) <!-- id: 40 -->
+    - [x] Frontend: Update Queue UI (History, Up Next, Shuffle) <!-- id: 41 -->
+    - [x] Local: Implement Smart Queue & Shuffle (Spotify-like) <!-- id: 43 -->
+    - [x] **UI: YouTube Music Replica** <!-- id: 4 -->
+    - [x] Create `Navbar` with Search and integrate into `Layout` <!-- id: 5 -->
+    - [x] Refactor `Home.tsx` (Category Pills, Quick Picks Grid) <!-- id: 6 -->
+    - [x] Create `Explore.tsx` (New Releases, Charts, Moods) <!-- id: 7 -->
+    - [x] Polish Styling (Fonts, Colors, Spacing) <!-- id: 8 -->
+    - [x] **Enterprise Database Schema** <!-- id: 9 -->
+        - [x] Update `schema.prisma` with `UserQueue`, `UserTrackStats`, `TrackRegionStats` <!-- id: 10 -->
+        - [x] Run Migrations <!-- id: 11 -->
+    - [x] **Real Data Backend** <!-- id: 12 -->
+        - [x] Implement `UserTrackStats` aggregation logic <!-- id: 13 -->
+        - [x] Create `/api/music/home` aggregator endpoint <!-- id: 14 -->
+        - [x] Implement "Trending" and "New Releases" queries <!-- id: 15 -->
+        - [x] **Hybrid Data Fetching** (New)
+            - [x] Integrate `YTMusic` API for Trending/New Releases
+            - [x] Implement Region Selection support
+    - [x] **Real Data Frontend** <!-- id: 16 -->
+        - [x] Connect `Home.tsx` to real API <!-- id: 17 -->
+        - [x] Cleanup `Navbar` and Logo <!-- id: 18 -->
+        - [x] Add Region Selector to Home Page
+    - [ ] Core Systems Refinement <!-- id: 45 -->
+        - [ ] Backend: Implement `getUpNexts` for Recommendations
+        - [ ] Frontend: Refactor Queue Logic (Store-based, History-aware)
+        - [ ] Frontend: Implement Playlist UI (Library, Detail, Add Modal)
+    - [ ] **Social & User Features** <!-- id: 4 -->
+    - [ ] **Backend: Friends System** (Request/Accept/Block) <!-- id: 5 -->
+    - [ ] **Frontend: Friends UI** (Sidebar/Modal) <!-- id: 6 -->
+    - [ ] **User Profile & Settings** (Avatar, Theme) <!-- id: 7 -->
+    - [ ] **Backend: Listening History** (Schema & API) <!-- id: 8 -->
+- [ ] **Advanced Recommendation & Queue Engine** <!-- id: 9 -->
+    - [ ] **Infrastructure: Python AI Service** (FastAPI, scikit-learn/PyTorch) <!-- id: 14 -->
+    - [ ] **Database: Signal & Feature Schema** (UserSignal, TrackFeature) <!-- id: 15 -->
+    - [ ] **Backend: Signal Collection API** (Node.js -> Python) <!-- id: 16 -->
+    - [ ] **Algorithm: Candidate Generation & Ranking** (Python) <!-- id: 17 -->
+    - [ ] **Frontend: Queue Logic Refinement** (History preservation, Context switching) <!-- id: 18 -->
+    - [ ] **Frontend: Signal Tracking** (Skip, Dwell time, Volume, etc.) <!-- id: 19 -->
+    - [ ] Security: Comprehensive Input Validation (Zod) <!-- id: 42 -->
