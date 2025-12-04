@@ -1,20 +1,38 @@
 import { useState, useEffect } from 'react';
-import { Play, Plus, ListPlus } from 'lucide-react';
-import { useLocation } from 'react-router-dom';
+import { Play, Plus, ListPlus, User, Disc, Music, Search as SearchIconLucide } from 'lucide-react';
+
+import { useLocation, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { usePlayerStore, type Track } from '../store/usePlayerStore';
 
+interface SearchResultItem {
+    type: 'track' | 'artist' | 'album' | 'playlist';
+    id: string;
+    pipedId?: string;
+    title: string;
+    subtitle?: string;
+    thumbnail?: string;
+    score?: number;
+    action?: 'play' | 'navigate';
+    data?: any;
+}
+
+interface SearchResponse {
+    tracks: SearchResultItem[];
+    artists: SearchResultItem[];
+    albums: SearchResultItem[];
+    playlists: SearchResultItem[];
+}
+
 export const Search = () => {
-    const [results, setResults] = useState<any[]>([]);
+    const [data, setData] = useState<SearchResponse>({ tracks: [], artists: [], albums: [], playlists: [] });
     const [loading, setLoading] = useState(false);
     const { token } = useAuthStore();
     const { playTrack, addToQueue } = usePlayerStore();
     const location = useLocation();
 
-    // Playlist Modal State
-    const [showPlaylistModal, setShowPlaylistModal] = useState(false);
-    const [selectedTrack, setSelectedTrack] = useState<any>(null);
-    const [playlists, setPlaylists] = useState<any[]>([]);
+    // Playlist Modal State (Simplified for now, can be re-added if needed)
+    // const [showPlaylistModal, setShowPlaylistModal] = useState(false);
 
     useEffect(() => {
         const params = new URLSearchParams(location.search);
@@ -22,74 +40,20 @@ export const Search = () => {
         if (q) {
             performSearch(q);
         } else {
-            setResults([]);
+            setData({ tracks: [], artists: [], albums: [], playlists: [] });
         }
     }, [location.search]);
-
-    useEffect(() => {
-        if (showPlaylistModal) {
-            fetchPlaylists();
-        }
-    }, [showPlaylistModal]);
-
-    const fetchPlaylists = async () => {
-        try {
-            const res = await fetch('/api/library/playlists', {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            const data = await res.json();
-            setPlaylists(data);
-        } catch (err) {
-            console.error(err);
-        }
-    };
-
-    const openPlaylistModal = (item: any) => {
-        setSelectedTrack(item);
-        setShowPlaylistModal(true);
-    };
-
-    const addToPlaylist = async (playlistId: string) => {
-        if (!selectedTrack) return;
-
-        const trackData = {
-            pipedId: selectedTrack.url.split('/streams/')[1] || selectedTrack.url,
-            title: selectedTrack.title,
-            artist: selectedTrack.uploaderName,
-            thumbnailUrl: selectedTrack.thumbnail,
-            duration: selectedTrack.duration
-        };
-
-        if (selectedTrack.url.includes('watch?v=')) {
-            trackData.pipedId = selectedTrack.url.split('v=')[1];
-        }
-
-        try {
-            await fetch(`/api/library/playlists/${playlistId}/tracks`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ track: trackData })
-            });
-            setShowPlaylistModal(false);
-            setSelectedTrack(null);
-        } catch (err) {
-            console.error(err);
-        }
-    };
 
     const performSearch = async (searchQuery: string) => {
         if (!searchQuery.trim()) return;
 
         setLoading(true);
         try {
-            const res = await fetch(`/api/music/search?q=${encodeURIComponent(searchQuery)}&filter=music_songs`, {
+            const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            const data = await res.json();
-            setResults(data.items || []);
+            const responseData = await res.json();
+            setData(responseData);
         } catch (err) {
             console.error(err);
         } finally {
@@ -97,97 +61,164 @@ export const Search = () => {
         }
     };
 
-    const handlePlay = (item: any) => {
+    const handlePlay = (item: SearchResultItem) => {
+        if (item.type !== 'track') return;
+
+        // Construct track object compatible with player
         const track: Track = {
-            url: item.url,
+            url: `/api/music/streams/${item.pipedId || item.id}`,
             title: item.title,
-            thumbnail: item.thumbnail,
-            uploaderName: item.uploaderName,
-            duration: item.duration,
+            thumbnail: item.thumbnail || '',
+            uploaderName: item.subtitle || 'Unknown Artist',
+            duration: 0, // We might not have duration in search results yet
+            artistId: undefined,
+            type: 'song'
         };
         playTrack(track);
     };
 
-    return (
-        <div className="space-y-6">
-            <h2 className="text-3xl font-bold tracking-tight">Search Results</h2>
+    const SectionHeader = ({ title, icon: Icon }: { title: string, icon: any }) => (
+        <div className="flex items-center space-x-2 mb-4">
+            <Icon className="text-retro-primary" size={24} />
+            <h2 className="text-2xl font-bold tracking-tight text-white">{title}</h2>
+        </div>
+    );
 
-            <div className="space-y-4">
-                {loading ? (
-                    <div className="text-center text-gray-400 py-10">Searching...</div>
-                ) : (
-                    results.map((item) => (
-                        <div
-                            key={item.url}
-                            className="flex items-center justify-between p-4 bg-retro-surface/50 rounded-lg hover:bg-retro-surface transition-colors group cursor-pointer"
-                            onClick={() => handlePlay(item)}
-                        >
-                            <div className="flex items-center space-x-4">
-                                <img src={item.thumbnail} alt={item.title} className="w-12 h-12 rounded object-cover" />
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <div className="animate-pulse flex flex-col items-center space-y-4">
+                    <div className="w-12 h-12 rounded-full border-4 border-retro-primary border-t-transparent animate-spin"></div>
+                    <p className="text-gray-400 font-medium">Searching the universe...</p>
+                </div>
+            </div>
+        );
+    }
+
+    const hasResults = data.tracks.length > 0 || data.artists.length > 0 || data.albums.length > 0 || data.playlists.length > 0;
+
+    if (!hasResults && !loading) {
+        return (
+            <div className="flex flex-col items-center justify-center h-64 text-center">
+                <SearchIconLucide size={48} className="text-gray-600 mb-4" />
+                <h3 className="text-xl font-bold text-gray-300">No results found</h3>
+                <p className="text-gray-500 mt-2">Try searching for a song, artist, or album.</p>
+            </div>
+        );
+    }
+
+
+    return (
+        <div className="space-y-10 pb-20">
+            {/* Artists Section - Horizontal Grid */}
+            {data.artists.length > 0 && (
+                <section>
+                    <SectionHeader title="Artists" icon={User} />
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                        {data.artists.map((artist, index) => (
+                            <Link
+                                to={`/artist/${artist.pipedId || artist.id}`}
+                                key={`${artist.id}-${index}`}
+                                className="group flex flex-col items-center text-center space-y-3"
+                            >
+                                <div className="relative w-32 h-32 md:w-40 md:h-40 rounded-full overflow-hidden shadow-lg group-hover:scale-105 transition-transform duration-300 border-2 border-transparent group-hover:border-retro-primary">
+                                    <img src={artist.thumbnail} alt={artist.title} className="w-full h-full object-cover" />
+                                </div>
                                 <div>
-                                    <h3 className="font-medium text-white group-hover:text-retro-primary transition-colors">{item.title}</h3>
-                                    <p className="text-sm text-gray-400">{item.uploaderName}</p>
+                                    <h3 className="font-bold text-white group-hover:text-retro-primary transition-colors truncate w-full">{artist.title}</h3>
+                                    <p className="text-sm text-gray-400">Artist</p>
+                                </div>
+                            </Link>
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            {/* Songs Section - Vertical List */}
+            {data.tracks.length > 0 && (
+                <section>
+                    <SectionHeader title="Songs" icon={Music} />
+                    <div className="bg-white/5 rounded-xl overflow-hidden border border-white/5">
+                        {data.tracks.map((track, index) => (
+                            <div
+                                key={`${track.id}-${index}`}
+                                onClick={() => handlePlay(track)}
+                                className="group flex items-center p-3 hover:bg-white/10 transition-colors cursor-pointer border-b border-white/5 last:border-0"
+                            >
+                                <div className="w-8 text-center text-gray-500 text-sm mr-4 group-hover:hidden">{index + 1}</div>
+                                <div className="w-8 text-center hidden group-hover:block mr-4">
+                                    <Play size={16} className="text-white mx-auto" fill="white" />
+                                </div>
+
+                                <img src={track.thumbnail} alt={track.title} className="w-10 h-10 rounded object-cover shadow-sm mr-4" />
+
+                                <div className="flex-1 min-w-0">
+                                    <h4 className="font-medium text-white truncate group-hover:text-retro-primary transition-colors">{track.title}</h4>
+                                    <p className="text-sm text-gray-400 truncate">{track.subtitle}</p>
+                                </div>
+
+                                <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity px-4">
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); addToQueue({ ...track, uploaderName: track.subtitle, url: `/api/music/streams/${track.pipedId || track.id}` } as any); }}
+                                        className="p-2 hover:bg-white/20 rounded-full text-gray-300 hover:text-white"
+                                        title="Add to Queue"
+                                    >
+                                        <Plus size={18} />
+                                    </button>
                                 </div>
                             </div>
-
-                            <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); handlePlay(item); }}
-                                    className="p-2 hover:bg-retro-primary hover:text-black rounded-full transition-colors"
-                                >
-                                    <Play size={20} />
-                                </button>
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); addToQueue(item); }}
-                                    className="p-2 hover:bg-white/10 rounded-full transition-colors"
-                                    title="Add to Queue"
-                                >
-                                    <Plus size={20} />
-                                </button>
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); openPlaylistModal(item); }}
-                                    className="p-2 hover:bg-white/10 rounded-full transition-colors"
-                                    title="Add to Playlist"
-                                >
-                                    <ListPlus size={20} />
-                                </button>
-                            </div>
-                        </div>
-                    ))
-                )}
-            </div>
-
-            {/* Playlist Selection Modal */}
-            {
-                showPlaylistModal && (
-                    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-                        <div className="bg-retro-surface p-6 rounded-2xl border border-white/10 w-full max-w-md max-h-[80vh] overflow-y-auto">
-                            <h3 className="text-xl font-bold mb-4">Add to Playlist</h3>
-                            <div className="space-y-2">
-                                {playlists.map(playlist => (
-                                    <button
-                                        key={playlist.id}
-                                        onClick={() => addToPlaylist(playlist.id)}
-                                        className="w-full text-left p-3 hover:bg-white/10 rounded-lg flex justify-between items-center transition-colors"
-                                    >
-                                        <span className="font-medium">{playlist.name}</span>
-                                        <span className="text-sm text-gray-400">{playlist._count.tracks} tracks</span>
-                                    </button>
-                                ))}
-                                {playlists.length === 0 && (
-                                    <p className="text-gray-400 text-center py-4">No playlists found. Create one in Library first.</p>
-                                )}
-                            </div>
-                            <button
-                                onClick={() => setShowPlaylistModal(false)}
-                                className="mt-6 w-full py-2 text-gray-400 hover:text-white"
-                            >
-                                Cancel
-                            </button>
-                        </div>
+                        ))}
                     </div>
-                )
-            }
-        </div >
+                </section>
+            )}
+
+            {/* Albums Section - Grid */}
+            {data.albums.length > 0 && (
+                <section>
+                    <SectionHeader title="Albums" icon={Disc} />
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                        {data.albums.map((album, index) => (
+                            <Link
+                                to={`/library/playlist/${album.pipedId || album.id}`}
+                                key={`${album.id}-${index}`}
+                                className="group cursor-pointer"
+                            >
+                                <div className="relative aspect-square rounded-lg overflow-hidden shadow-lg mb-3 group-hover:shadow-retro-primary/20 transition-all">
+                                    <img src={album.thumbnail} alt={album.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                        <Play size={32} fill="white" className="text-white drop-shadow-lg" />
+                                    </div>
+                                </div>
+                                <h3 className="font-bold text-white truncate group-hover:text-retro-primary transition-colors">{album.title}</h3>
+                                <p className="text-sm text-gray-400 truncate">{album.subtitle}</p>
+                            </Link>
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            {/* Playlists Section - Grid */}
+            {data.playlists.length > 0 && (
+                <section>
+                    <SectionHeader title="Playlists" icon={ListPlus} />
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                        {data.playlists.map((playlist, index) => (
+                            <Link
+                                to={`/library/playlist/${playlist.pipedId || playlist.id}`}
+                                key={`${playlist.id}-${index}`}
+                                className="group cursor-pointer"
+                            >
+                                <div className="relative aspect-square rounded-lg overflow-hidden shadow-lg mb-3 group-hover:shadow-retro-primary/20 transition-all">
+                                    <img src={playlist.thumbnail} alt={playlist.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                                </div>
+                                <h3 className="font-bold text-white truncate group-hover:text-retro-primary transition-colors">{playlist.title}</h3>
+                                <p className="text-sm text-gray-400 truncate">{playlist.subtitle}</p>
+                            </Link>
+                        ))}
+                    </div>
+                </section>
+            )}
+
+        </div>
     );
 };

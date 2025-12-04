@@ -95,6 +95,9 @@ model Track {
   album        String?
   thumbnailUrl String?
   duration     Int // in seconds
+  
+  artistId     String?
+  artistRel    Artist? @relation(fields: [artistId], references: [id])
 
   // relations
   playlists PlaylistTrack[]
@@ -128,14 +131,39 @@ model LikedTrack {
   @@index([trackId])
 }
 
+model Artist {
+  id               String   @id @default(uuid())
+  pipedId          String   @unique // YouTube Channel ID
+  name             String
+  thumbnailUrl     String?
+  monthlyListeners Int      @default(0)
+  updatedAt        DateTime @updatedAt
+  
+  tracks           Track[]
+  
+  @@index([name])
+  @@index([monthlyListeners(sort: Desc)])
+}
+
 model Playlist {
-  id     String          @id @default(uuid())
-  name   String
-  userId String
-  user   User            @relation(fields: [userId], references: [id])
-  tracks PlaylistTrack[]
+  id           String          @id @default(uuid())
+  name         String
+  description  String?
+  thumbnailUrl String?
+  userId       String?         // Optional for system playlists
+  user         User?           @relation(fields: [userId], references: [id])
+  isPublic     Boolean         @default(false)
+  isSystem     Boolean         @default(false)
+  tracks       PlaylistTrack[]
+  
+  // Analytics
+  playCount    Int             @default(0)
+  likes        Int             @default(0)
+  updatedAt    DateTime        @updatedAt @default(now())
 
   @@index([userId])
+  @@index([isPublic, playCount(sort: Desc)])
+  @@index([isSystem])
 }
 
 model PlaylistTrack {

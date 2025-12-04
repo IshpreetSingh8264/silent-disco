@@ -4,7 +4,7 @@ import { X, Trash2, Play, History, ListMusic } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import toast from 'react-hot-toast';
 import { useShallow } from 'zustand/react/shallow';
-import { useLocation } from 'react-router-dom';
+import { useLocation, Link } from 'react-router-dom';
 
 interface QueueProps {
     isOpen: boolean;
@@ -115,7 +115,13 @@ export const Queue = ({ isOpen, onClose }: QueueProps) => {
                             <img src={currentTrack.thumbnail} alt="" className="w-16 h-16 rounded-lg object-cover shadow-md z-10" />
                             <div className="flex-1 min-w-0 z-10">
                                 <h4 className="font-bold text-white truncate text-lg">{currentTrack.title}</h4>
-                                <p className="text-sm text-gray-300 truncate">{currentTrack.artist || currentTrack.uploaderName || 'Unknown Artist'}</p>
+                                {currentTrack.artistId ? (
+                                    <Link to={`/artist/${currentTrack.artistId}`} className="text-sm text-gray-300 truncate hover:text-white hover:underline block" onClick={(e) => e.stopPropagation()}>
+                                        {currentTrack.artist || currentTrack.uploaderName || 'Unknown Artist'}
+                                    </Link>
+                                ) : (
+                                    <p className="text-sm text-gray-300 truncate">{currentTrack.artist || currentTrack.uploaderName || 'Unknown Artist'}</p>
+                                )}
                             </div>
                             <div className="text-xs text-gray-400 font-mono z-10 mr-2">
                                 {formatDuration(currentTrack.duration)}
@@ -164,7 +170,13 @@ export const Queue = ({ isOpen, onClose }: QueueProps) => {
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <h4 className="font-medium truncate text-white text-sm group-hover:text-retro-primary transition-colors">{track.title}</h4>
-                                        <p className="text-xs text-gray-400 truncate">{track.artist || track.uploaderName || 'Unknown Artist'}</p>
+                                        {track.artistId ? (
+                                            <Link to={`/artist/${track.artistId}`} className="text-xs text-gray-400 truncate hover:text-white hover:underline block" onClick={(e) => e.stopPropagation()}>
+                                                {track.artist || track.uploaderName || 'Unknown Artist'}
+                                            </Link>
+                                        ) : (
+                                            <p className="text-xs text-gray-400 truncate">{track.artist || track.uploaderName || 'Unknown Artist'}</p>
+                                        )}
                                     </div>
                                     <div className="text-xs text-gray-500 font-mono group-hover:text-gray-300">
                                         {formatDuration(track.duration)}
@@ -200,7 +212,13 @@ export const Queue = ({ isOpen, onClose }: QueueProps) => {
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <h4 className="font-medium truncate text-white text-sm">{track.title}</h4>
-                                        <p className="text-xs text-gray-400 truncate">{track.artist || track.uploaderName || 'Unknown Artist'}</p>
+                                        {track.artistId ? (
+                                            <Link to={`/artist/${track.artistId}`} className="text-xs text-gray-400 truncate hover:text-white hover:underline block" onClick={(e) => e.stopPropagation()}>
+                                                {track.artist || track.uploaderName || 'Unknown Artist'}
+                                            </Link>
+                                        ) : (
+                                            <p className="text-xs text-gray-400 truncate">{track.artist || track.uploaderName || 'Unknown Artist'}</p>
+                                        )}
                                     </div>
                                     <div className="text-xs text-gray-500 font-mono">
                                         {formatDuration(track.duration)}

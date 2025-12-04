@@ -8,8 +8,11 @@ declare module 'fastify' {
     }
 }
 
+import { prisma } from '../db';
+
 const prismaPlugin: FastifyPluginAsync = fp(async (server, options) => {
-    const prisma = new PrismaClient();
+    // const prisma = new PrismaClient(); // Removed
+
 
     await prisma.$connect();
 

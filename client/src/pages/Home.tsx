@@ -126,6 +126,11 @@ const Shelf = ({ title, items, onPlay, onAddToQueue }: ShelfProps) => {
 
                         <h3 className="font-bold text-white truncate text-sm group-hover:text-retro-primary transition-colors">{item.title}</h3>
                         <p className="text-xs text-gray-400 truncate group-hover:text-white transition-colors">{item.uploaderName}</p>
+                        {item.type === 'playlist' && (
+                            <div className="absolute top-2 right-2 bg-black/60 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">
+                                Playlist
+                            </div>
+                        )}
                     </div>
                 ))}
             </div>
@@ -173,6 +178,12 @@ export const Home = () => {
     };
 
     const handlePlay = (item: any) => {
+        if (item.type === 'playlist') {
+            // Navigate to playlist
+            window.location.href = item.url; // Or use useNavigate if available, but href works for now
+            return;
+        }
+
         const track: Track = {
             url: item.url,
             title: item.title,
@@ -180,7 +191,9 @@ export const Home = () => {
             uploaderName: item.uploaderName,
             duration: item.duration,
             id: item.pipedId,
-            pipedId: item.pipedId
+            pipedId: item.pipedId,
+            artistId: item.artistId,
+            type: 'song'
         };
         playTrack(track);
     };
@@ -193,7 +206,9 @@ export const Home = () => {
             uploaderName: item.uploaderName,
             duration: item.duration,
             id: item.pipedId,
-            pipedId: item.pipedId
+            pipedId: item.pipedId,
+            artistId: item.artistId,
+            type: 'song'
         };
         addToQueue(track);
     };

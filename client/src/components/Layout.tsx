@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Home, Compass, Library, Users, Settings, PlayCircle } from 'lucide-react';
+import { Home, Library, PlayCircle, Users, Settings } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { usePlayerStore } from '../store/usePlayerStore';
 import { Player } from './Player';
@@ -40,7 +40,7 @@ export const Layout = () => {
 
                 <nav className="flex-1 px-3 space-y-1">
                     <SidebarItem icon={Home} label="Home" to="/" isActive={isActive('/')} />
-                    <SidebarItem icon={Compass} label="Explore" to="/explore" isActive={isActive('/explore')} />
+
                     <SidebarItem icon={Library} label="Library" to="/library" isActive={isActive('/library')} />
 
                     <div className="pt-6 pb-2 px-4">
@@ -76,10 +76,6 @@ export const Layout = () => {
                 <Link to="/" className={`flex flex-col items-center space-y-1 ${isActive('/') ? 'text-white' : 'text-gray-500'}`}>
                     <Home size={24} fill={isActive('/') ? "currentColor" : "none"} />
                     <span className="text-[10px] font-medium">Home</span>
-                </Link>
-                <Link to="/explore" className={`flex flex-col items-center space-y-1 ${isActive('/explore') ? 'text-white' : 'text-gray-500'}`}>
-                    <Compass size={24} fill={isActive('/explore') ? "currentColor" : "none"} />
-                    <span className="text-[10px] font-medium">Explore</span>
                 </Link>
                 <Link to="/library" className={`flex flex-col items-center space-y-1 ${isActive('/library') ? 'text-white' : 'text-gray-500'}`}>
                     <Library size={24} fill={isActive('/library') ? "currentColor" : "none"} />

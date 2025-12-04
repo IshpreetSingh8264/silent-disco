@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { usePlayerStore, type Track } from '../store/usePlayerStore';
 import { Play, Clock, Heart, Trash2 } from 'lucide-react';
@@ -11,6 +11,8 @@ export const PlaylistDetail = () => {
     const { playPlaylist } = usePlayerStore();
     const [tracks, setTracks] = useState<Track[]>([]);
     const [title, setTitle] = useState('');
+    const [error, setError] = useState<string | null>(null);
+    const [loading, setLoading] = useState(true);
     const isLiked = location.pathname === '/library/liked';
 
     useEffect(() => {
@@ -18,35 +20,57 @@ export const PlaylistDetail = () => {
     }, [id, token]);
 
     const fetchTracks = async () => {
+        setLoading(true);
+        setError(null);
+        // Simple UUID regex check
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id || '');
+        const isExternal = !isUuid && !isLiked; // Treat anything not a UUID (and not 'liked') as external
+
         const endpoint = isLiked
-            ? 'http://localhost:3000/api/library/liked'
-            : `http://localhost:3000/api/library/playlists/${id}`;
+            ? '/api/library/liked'
+            : isExternal
+                ? `/api/playlists/public/${id}` // Use the public playlist endpoint for external IDs
+                : `/api/library/playlists/${id}`;
 
         try {
             const res = await fetch(endpoint, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+
+            if (!res.ok) {
+                console.error('Failed to fetch playlist:', res.statusText);
+                setError('Failed to load playlist. It might be private or unsupported.');
+                setLoading(false);
+                return;
+            }
+
             const data = await res.json();
 
             if (isLiked) {
                 setTracks(data.map((t: any) => ({
                     ...t,
-                    url: `http://localhost:3000/api/music/streams/${t.pipedId}`,
+                    url: `/api/music/streams/${t.pipedId}`,
                     thumbnail: t.thumbnailUrl,
-                    uploaderName: t.artist
+                    uploaderName: t.artist,
+                    artistId: t.artistId
                 })));
                 setTitle('Liked Songs');
             } else {
+                // Both Local and External playlists now use the same structure
                 setTracks(data.tracks.map((t: any) => ({
                     ...t.track,
-                    url: `http://localhost:3000/api/music/streams/${t.track.pipedId}`,
+                    url: `/api/music/streams/${t.track.pipedId}`,
                     thumbnail: t.track.thumbnailUrl,
-                    uploaderName: t.track.artist
+                    uploaderName: t.track.artist,
+                    artistId: t.track.artistId
                 })));
-                setTitle(data.name);
+                setTitle(data.name || 'Unknown Playlist');
             }
         } catch (err) {
             console.error(err);
+            setError('An error occurred while loading the playlist.');
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -89,12 +113,25 @@ export const PlaylistDetail = () => {
         }
     };
 
+    if (loading) {
+        return <div className="flex items-center justify-center h-full text-white">Loading...</div>;
+    }
+
+    if (error) {
+        return (
+            <div className="flex flex-col items-center justify-center h-full text-white space-y-4">
+                <div className="text-xl font-bold text-red-400">{error}</div>
+                <Link to="/" className="text-retro-primary hover:underline">Go Home</Link>
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-8">
             {/* Header */}
             <div className="flex items-end space-x-6 p-8 bg-gradient-to-b from-retro-primary/20 to-transparent">
                 <div className={`w-52 h-52 shadow-2xl flex items-center justify-center rounded-lg ${isLiked ? 'bg-gradient-to-br from-purple-600 to-blue-600' : 'bg-retro-surface border border-white/10'}`}>
-                    {isLiked ? <Heart size={80} fill="white" /> : <span className="text-6xl font-bold">{title[0]}</span>}
+                    {isLiked ? <Heart size={80} fill="white" /> : <span className="text-6xl font-bold">{title ? title[0] : '?'}</span>}
                 </div>
                 <div className="space-y-4">
                     <span className="uppercase text-sm font-bold tracking-wider text-white/80">{isLiked ? 'Playlist' : 'Playlist'}</span>
@@ -138,7 +175,7 @@ export const PlaylistDetail = () => {
                     <tbody>
                         {tracks.map((track, i) => (
                             <tr
-                                key={track.id}
+                                key={`${track.id}-${i}`}
                                 className="group hover:bg-white/5 transition-colors cursor-pointer rounded-lg"
                                 onClick={() => playPlaylist(tracks, i)}
                             >
@@ -148,7 +185,13 @@ export const PlaylistDetail = () => {
                                         <img src={track.thumbnailUrl} alt="" className="w-10 h-10 rounded object-cover" />
                                         <div>
                                             <div className="text-white font-medium">{track.title}</div>
-                                            <div className="text-sm text-gray-400">{track.artist}</div>
+                                            {track.artistId ? (
+                                                <Link to={`/artist/${track.artistId}`} className="text-sm text-gray-400 hover:text-white hover:underline block" onClick={(e) => e.stopPropagation()}>
+                                                    {track.artist || track.uploaderName}
+                                                </Link>
+                                            ) : (
+                                                <div className="text-sm text-gray-400">{track.artist || track.uploaderName}</div>
+                                            )}
                                         </div>
                                     </div>
                                 </td>

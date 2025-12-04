@@ -11,13 +11,15 @@ const queueRoutes: FastifyPluginAsync = async (server) => {
         const queue = await server.prisma.userQueue.findMany({
             where: { userId },
             orderBy: { position: 'asc' },
-            include: { track: true }
+            include: { track: { include: { artistRel: true } } }
         });
         return queue.map(q => ({
             ...q.track,
             queueId: q.id, // Use UserQueue ID as unique identifier in frontend
             isManual: q.source === 'MANUAL',
-            url: `/api/music/streams/${q.track.pipedId}` // Generate stream URL
+            url: `/api/music/streams/${q.track.pipedId}`, // Generate stream URL
+            artistId: q.track.artistId, // Ensure artistId is passed
+            duration: q.track.duration || 0 // Explicitly pass duration
         }));
     });
 

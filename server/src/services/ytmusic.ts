@@ -1,7 +1,7 @@
 import YTMusic from 'ytmusic-api';
 
 class YTMusicService {
-    private api: YTMusic;
+    public api: YTMusic;
     private initialized: boolean = false;
 
     constructor() {
@@ -28,6 +28,31 @@ class YTMusicService {
     async getUpNexts(videoId: string) {
         await this.initialize();
         return this.api.getUpNexts(videoId);
+    }
+
+    async getArtist(artistId: string) {
+        await this.initialize();
+        return this.api.getArtist(artistId);
+    }
+
+    async getPlaylist(playlistId: string) {
+        await this.initialize();
+        return this.api.getPlaylist(playlistId);
+    }
+
+    async getAlbum(albumId: string) {
+        await this.initialize();
+        return this.api.getAlbum(albumId);
+    }
+
+    async getArtistSongs(artistId: string) {
+        await this.initialize();
+        return this.api.getArtistSongs(artistId);
+    }
+
+    async getArtistAlbums(artistId: string) {
+        await this.initialize();
+        return this.api.getArtistAlbums(artistId);
     }
 }
 

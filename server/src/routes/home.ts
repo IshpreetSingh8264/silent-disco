@@ -28,7 +28,8 @@ export default async function homeRoutes(fastify: FastifyInstance) {
         uploaderName: track.artist || 'Unknown Artist',
         duration: track.duration,
         pipedId: track.pipedId,
-        id: track.pipedId
+        id: track.pipedId,
+        artistId: track.artistRel?.pipedId // Use relation if available
     });
 
     // Helper to map API items
@@ -38,7 +39,8 @@ export default async function homeRoutes(fastify: FastifyInstance) {
         thumbnail: item.thumbnails?.[item.thumbnails.length - 1]?.url || '',
         uploaderName: item.artist?.name || 'Unknown Artist',
         duration: parseDuration(item.duration),
-        pipedId: item.videoId
+        pipedId: item.videoId,
+        artistId: item.artist?.browseId
     });
 
     fastify.get('/home', {
@@ -51,16 +53,16 @@ export default async function homeRoutes(fastify: FastifyInstance) {
             // --- PERSONAL SECTIONS (DB) ---
 
             // 1. Listen Again (History)
-            const history = await prisma.listeningHistory.findMany({
+            const history = await fastify.prisma.listeningHistory.findMany({
                 where: { userId },
                 orderBy: { playedAt: 'desc' },
                 distinct: ['trackId'],
                 take: 20,
-                include: { track: true }
+                include: { track: { include: { artistRel: true } } }
             });
 
             // 2. Your Playlists
-            const playlists = await prisma.playlist.findMany({
+            const playlists = await fastify.prisma.playlist.findMany({
                 where: { userId },
                 take: 10,
                 include: { _count: { select: { tracks: true } } }
@@ -68,11 +70,11 @@ export default async function homeRoutes(fastify: FastifyInstance) {
 
             // 3. Quick Picks (Stats + API Enrichment)
             // Get top tracks from DB stats
-            const topStats = await prisma.userTrackStats.findMany({
+            const topStats = await fastify.prisma.userTrackStats.findMany({
                 where: { userId },
                 orderBy: { playCount: 'desc' },
                 take: 5,
-                include: { track: true }
+                include: { track: { include: { artistRel: true } } }
             });
 
             let quickPicksItems: any[] = [];
@@ -195,7 +197,7 @@ export default async function homeRoutes(fastify: FastifyInstance) {
                         if (song && song.thumbnails && song.thumbnails.length > 0) {
                             const newThumbnail = song.thumbnails[song.thumbnails.length - 1].url;
                             // Update DB
-                            await prisma.track.update({
+                            await fastify.prisma.track.update({
                                 where: { id },
                                 data: { thumbnailUrl: newThumbnail }
                             });
@@ -224,7 +226,8 @@ export default async function homeRoutes(fastify: FastifyInstance) {
                 uploaderName: track.artist || 'Unknown Artist',
                 duration: track.duration,
                 pipedId: track.pipedId,
-                id: track.pipedId
+                id: track.pipedId,
+                artistId: track.artistRel?.pipedId
             });
 
             // --- ASSEMBLE SHELVES ---
@@ -249,6 +252,48 @@ export default async function homeRoutes(fastify: FastifyInstance) {
 
             if (newReleasesItems.length > 0) {
                 shelves.push({ title: "New Releases", items: newReleasesItems });
+            }
+
+            // 6. Popular Public Playlists
+            const publicPlaylists = await fastify.prisma.playlist.findMany({
+                where: { OR: [{ isPublic: true }, { isSystem: true }] },
+                orderBy: { playCount: 'desc' },
+                take: 10,
+                include: { _count: { select: { tracks: true } } }
+            });
+
+            if (publicPlaylists.length > 0) {
+                shelves.push({
+                    title: "Popular Public Playlists",
+                    items: publicPlaylists.map(p => ({
+                        id: p.id,
+                        title: p.name,
+                        thumbnail: p.thumbnailUrl || '',
+                        uploaderName: `${p._count.tracks} tracks`,
+                        type: 'playlist',
+                        url: `/library/playlist/${p.id}` // Frontend URL
+                    }))
+                });
+            }
+
+            // 7. Because you listened to... (Artist Recs)
+            // Pick a random artist from top stats
+            if (topStats.length > 0) {
+                const randomStat = topStats[Math.floor(Math.random() * Math.min(topStats.length, 5))];
+                const artistName = randomStat.track.artist;
+                if (artistName) {
+                    try {
+                        // Fetch similar songs or artist top songs
+                        // For now, let's search for "Similar to [Artist]" or just more from them
+                        const songs = await ytmusicRegion.search(`Songs similar to ${artistName}`);
+                        const recItems = songs.filter((i: any) => i.videoId).map(mapApiItem);
+                        if (recItems.length > 0) {
+                            shelves.push({ title: `Because you listened to ${artistName}`, items: recItems });
+                        }
+                    } catch (e) {
+                        console.error("Failed to fetch artist recs:", e);
+                    }
+                }
             }
 
             // Add Playlists if needed, or handle separately

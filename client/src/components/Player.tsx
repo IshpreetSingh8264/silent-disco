@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { useLocation } from 'react-router-dom';
+import { useLocation, Link } from 'react-router-dom';
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Maximize2, Heart, ListMusic, Shuffle, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuthStore } from '../store/useAuthStore';
@@ -14,7 +14,7 @@ export const Player = () => {
     const {
         currentTrack, isPlaying, togglePlay, playTrack,
         isShuffle, toggleShuffle,
-        playNext, playPrevious, checkSmartQueue
+        playNext, playPrevious
     } = usePlayerStore();
 
     const queue = usePlayerStore(useShallow(state => [...state.queueExplicit, ...state.queueSystem, ...state.queueAI]));
@@ -43,7 +43,7 @@ export const Player = () => {
             lastTrackedTime.current = 0; // Reset tracking on track change
             // Trigger smart queue check whenever track changes
             if (!roomCode) {
-                checkSmartQueue();
+                // checkSmartQueue(); // Handled in store actions to prevent race conditions
             }
         }
     }, [currentTrack, roomCode]);
@@ -228,7 +228,13 @@ export const Player = () => {
                                 </motion.div>
                                 <div className="w-full text-center md:text-left space-y-2">
                                     <h2 className="text-3xl md:text-5xl font-bold text-white truncate drop-shadow-lg">{currentTrack.title}</h2>
-                                    <p className="text-xl md:text-2xl text-gray-200 drop-shadow-md">{currentTrack.artist || currentTrack.uploaderName}</p>
+                                    {currentTrack.artistId ? (
+                                        <Link to={`/artist/${currentTrack.artistId}`} className="text-xl md:text-2xl text-gray-200 drop-shadow-md hover:text-white hover:underline transition-all">
+                                            {currentTrack.artist || currentTrack.uploaderName}
+                                        </Link>
+                                    ) : (
+                                        <p className="text-xl md:text-2xl text-gray-200 drop-shadow-md">{currentTrack.artist || currentTrack.uploaderName}</p>
+                                    )}
                                 </div>
                                 <div className="mt-8 flex space-x-6">
                                     <button onClick={toggleLike} className="p-4 rounded-full bg-white/10 hover:bg-white/20 transition-colors backdrop-blur-md">
@@ -315,7 +321,13 @@ export const Player = () => {
                         )}
                         <div className="hidden md:block">
                             <h4 className="font-medium text-white truncate max-w-[200px]">{currentTrack.title}</h4>
-                            <p className="text-xs text-gray-400">{currentTrack.uploaderName}</p>
+                            {currentTrack.artistId ? (
+                                <Link to={`/artist/${currentTrack.artistId}`} className="text-xs text-gray-400 hover:text-white hover:underline transition-colors">
+                                    {currentTrack.uploaderName}
+                                </Link>
+                            ) : (
+                                <p className="text-xs text-gray-400">{currentTrack.uploaderName}</p>
+                            )}
                         </div>
                         <button onClick={toggleLike} className="hidden md:block text-gray-400 hover:text-retro-primary transition-colors">
                             <Heart size={20} fill={isLiked ? "currentColor" : "none"} className={isLiked ? "text-retro-primary" : ""} />

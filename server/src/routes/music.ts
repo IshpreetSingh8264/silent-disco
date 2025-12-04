@@ -22,14 +22,42 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
 
     // Helper to map YTMusic items to our app's format
     const mapItem = (item: any) => {
-        return {
-            url: `/api/music/streams/${item.videoId}`, // Use relative URL with proxy
-            title: item.name,
-            thumbnail: item.thumbnails?.[item.thumbnails.length - 1]?.url || '',
-            uploaderName: item.artist?.name || 'Unknown Artist',
-            duration: parseDuration(item.duration),
-            pipedId: item.videoId
-        };
+        // console.log('[mapItem] Inspecting:', JSON.stringify(item));
+        const type = item.type ? item.type.toLowerCase() : null;
+
+        if (item.videoId) {
+            return {
+                type: 'song',
+                url: `/api/music/streams/${item.videoId}`, // Use relative URL with proxy
+                title: item.name || item.title,
+                thumbnail: item.thumbnails?.[item.thumbnails.length - 1]?.url || '',
+                uploaderName: item.artist?.name || 'Unknown Artist',
+                duration: parseDuration(item.duration),
+                pipedId: item.videoId,
+                artistId: item.artist?.artistId || item.artist?.browseId
+            };
+        } else if (type === 'artist' || (item.artistId && !item.videoId)) {
+            return {
+                type: 'artist',
+                id: item.browseId || item.artistId,
+                title: item.name || item.title,
+                thumbnail: item.thumbnails?.[item.thumbnails.length - 1]?.url || '',
+                subscribers: item.subscribers
+            };
+        }
+
+        if (type === 'playlist' || type === 'album' || (item.browseId?.startsWith('VL') || item.browseId?.startsWith('PL'))) {
+            return {
+                type: 'playlist',
+                id: item.browseId || item.playlistId || item.albumId,
+                title: item.name || item.title,
+                thumbnail: item.thumbnails?.[item.thumbnails.length - 1]?.url || '',
+                count: item.count || item.trackCount || item.itemCount || 0,
+                uploaderName: item.artist?.name || 'Unknown',
+                isAlbum: type === 'album' // Flag to distinguish
+            };
+        }
+        return null;
     };
 
     server.get('/search', async (request, reply) => {
@@ -39,7 +67,7 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         });
 
         const { q } = schema.parse(request.query);
-        const cacheKey = `search:${q}`;
+        const cacheKey = `search:${q}:v2`;
 
         try {
             // Check cache
@@ -48,10 +76,9 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
                 return JSON.parse(cached);
             }
 
-            const songs = await ytmusic.search(q);
-            // Filter out items without videoId (e.g. artists, albums)
-            const validSongs = songs.filter((item: any) => item.videoId);
-            const items = validSongs.map(mapItem);
+            const results = await ytmusic.search(q);
+            console.log(`[Search] Query: ${q}, Raw Results:`, JSON.stringify(results.slice(0, 5), null, 2)); // Log first 5 items
+            const items = results.map(mapItem).filter((i: any) => i !== null);
 
             // Cache for 1 hour
             await redis.set(cacheKey, JSON.stringify({ items }), 3600);
@@ -157,6 +184,32 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
             let validSongs: any[] = [];
             const historyList = historyIds ? historyIds.split(',') : [];
 
+            // Fetch user context for AI
+            let likedTrackIds: string[] = [];
+            let topArtists: string[] = [];
+
+            if (request.user) {
+                const userId = (request.user as any).id;
+
+                // Get Liked Tracks
+                const liked = await server.prisma.likedTrack.findMany({
+                    where: { userId },
+                    select: { trackId: true, track: { select: { pipedId: true } } },
+                    take: 50,
+                    orderBy: { likedAt: 'desc' }
+                });
+                likedTrackIds = liked.map(l => l.track.pipedId);
+
+                // Get Top Artists
+                const stats = await server.prisma.userTrackStats.findMany({
+                    where: { userId },
+                    include: { track: true },
+                    orderBy: { playCount: 'desc' },
+                    take: 20
+                });
+                topArtists = Array.from(new Set(stats.map(s => s.track.artist).filter(Boolean)));
+            }
+
             // Try Python AI Engine first (via CLI)
             try {
                 const pythonScriptPath = path.join(process.cwd(), 'ai', 'recommend.py');
@@ -166,6 +219,8 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
                     userId: request.user?.userId || 'anonymous',
                     context: 'radio',
                     recentHistory: [seedTrackId, ...historyList],
+                    likedTracks: likedTrackIds,
+                    topArtists: topArtists,
                     limit: limit
                 });
 

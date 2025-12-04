@@ -46,7 +46,7 @@ const libraryRoutes: FastifyPluginAsync = async (server) => {
             where: { id },
             include: {
                 tracks: {
-                    include: { track: true },
+                    include: { track: { include: { artistRel: true } } },
                     orderBy: { order: 'asc' }
                 }
             }
@@ -130,7 +130,7 @@ const libraryRoutes: FastifyPluginAsync = async (server) => {
     server.get('/liked', { preValidation: [server.authenticate] }, async (request, reply) => {
         const likedTracks = await server.prisma.likedTrack.findMany({
             where: { userId: request.user.userId },
-            include: { track: true },
+            include: { track: { include: { artistRel: true } } },
             orderBy: { likedAt: 'desc' }
         });
         return likedTracks.map((lt: any) => lt.track);

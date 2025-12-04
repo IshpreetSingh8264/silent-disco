@@ -16,6 +16,8 @@ export interface Track {
     isPlayed?: boolean;
     isManual?: boolean;
     queueId?: string;
+    artistId?: string;
+    type?: 'song' | 'video';
 }
 
 interface PlayerState {

@@ -5,8 +5,8 @@ import { Login } from './pages/Login';
 import { Search } from './pages/Search';
 import { Room } from './pages/Room';
 import { Home } from './pages/Home';
-import { Explore } from './pages/Explore';
 import { Library } from './pages/Library';
+import { ArtistProfile } from './pages/ArtistProfile';
 import { PlaylistDetail } from './pages/PlaylistDetail';
 import { ProtectedRoute } from './components/ProtectedRoute'; // Moved ProtectedRoute to its own file
 import { useAuthStore } from './store/useAuthStore';
@@ -39,10 +39,10 @@ function App() {
         }>
           <Route index element={<Home />} />
           <Route path="search" element={<Search />} />
-          <Route path="explore" element={<Explore />} />
           <Route path="rooms" element={<Room />} /> {/* Original rooms route */}
           <Route path="library" element={<Library />} />
           <Route path="library/playlist/:id" element={<PlaylistDetail />} />
+          <Route path="artist/:id" element={<ArtistProfile />} />
           <Route path="library/liked" element={<PlaylistDetail />} />
           {/* Add other routes here */}
         </Route>

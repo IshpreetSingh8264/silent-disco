@@ -6,7 +6,7 @@ from ytmusicapi import YTMusic
 # Initialize YTMusic
 yt = YTMusic()
 
-def recommend(user_id, context, recent_history, limit=20):
+def recommend(user_id, context, recent_history, liked_tracks=[], top_artists=[], limit=20):
     # print(f"Generating recommendations for user {user_id} with context {context}", file=sys.stderr)
     
     candidates = []
@@ -25,17 +25,48 @@ def recommend(user_id, context, recent_history, limit=20):
 
     # B. From Context (Search) - Placeholder
     
-    # 2. Filtering
-    # Remove duplicates and already played songs
+    # B. From Top Artists (Discovery)
+    if top_artists and len(candidates) < limit * 2:
+        try:
+            # Pick a random top artist to explore
+            seed_artist = random.choice(top_artists)
+            # Search for songs by them or similar
+            search_results = yt.search(f"Songs similar to {seed_artist}", filter="songs", limit=10)
+            candidates.extend(search_results)
+        except Exception:
+            pass
+
+    # 2. Filtering & Ranking
     unique_candidates = {}
     for track in candidates:
-        if track['videoId'] not in recent_history and track['videoId'] not in unique_candidates:
-            unique_candidates[track['videoId']] = track
+        vid = track.get('videoId')
+        if not vid: continue
+        
+        # Skip if recently played
+        if vid in recent_history:
+            continue
+            
+        # Score the track
+        score = 0
+        
+        # Boost if from a top artist
+        artist_name = track['artists'][0]['name'] if track.get('artists') else ''
+        if artist_name in top_artists:
+            score += 5
+            
+        # Boost if previously liked (familiarity)
+        if vid in liked_tracks:
+            score += 3
+            
+        # Store with score
+        if vid not in unique_candidates:
+            track['score'] = score
+            unique_candidates[vid] = track
             
     final_candidates = list(unique_candidates.values())
     
-    # 3. Ranking (Heuristic for now)
-    random.shuffle(final_candidates)
+    # Sort by score desc, then random
+    final_candidates.sort(key=lambda x: x['score'] + random.random(), reverse=True)
     
     # Helper to parse duration
     def parse_duration(d):
@@ -82,9 +113,11 @@ if __name__ == "__main__":
         user_id = request.get("userId", "anonymous")
         context = request.get("context", "radio")
         recent_history = request.get("recentHistory", [])
+        liked_tracks = request.get("likedTracks", [])
+        top_artists = request.get("topArtists", [])
         limit = request.get("limit", 20)
         
-        recs = recommend(user_id, context, recent_history, limit)
+        recs = recommend(user_id, context, recent_history, liked_tracks, top_artists, limit)
         
         # Print result to stdout
         print(json.dumps({"recommendations": recs}))
