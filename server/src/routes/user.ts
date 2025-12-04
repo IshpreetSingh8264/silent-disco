@@ -1,5 +1,6 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { SignalType } from '@prisma/client';
 
 const userRoutes: FastifyPluginAsync = async (server) => {
     // Get Listening History
@@ -85,7 +86,7 @@ const userRoutes: FastifyPluginAsync = async (server) => {
     server.post('/signals', { preValidation: [server.authenticate] }, async (request, reply) => {
         const schema = z.object({
             trackId: z.string(),
-            type: z.string(),
+            type: z.nativeEnum(SignalType),
             value: z.number().optional(),
             metadata: z.any().optional()
         });

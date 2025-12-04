@@ -1,5 +1,6 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { ytmusic } from '../services/ytmusic';
 
 declare module 'fastify' {
     interface FastifyInstance {
@@ -61,17 +62,50 @@ const libraryRoutes: FastifyPluginAsync = async (server) => {
             track: z.object({
                 pipedId: z.string(),
                 title: z.string(),
-                artist: z.string(),
+                artist: z.string().optional(),
+                uploaderName: z.string().optional(),
                 thumbnailUrl: z.string().optional(),
                 duration: z.number()
             })
         });
         const { track: trackData } = schema.parse(request.body);
 
+        const artistName = trackData.artist || trackData.uploaderName || 'Unknown Artist';
+
         // Ensure track exists in DB
         let track = await server.prisma.track.findUnique({ where: { pipedId: trackData.pipedId } });
-        if (!track) {
-            track = await server.prisma.track.create({ data: trackData });
+
+        // If track doesn't exist OR has 0 duration, try to fetch details
+        if (!track || track.duration === 0) {
+            let duration = trackData.duration;
+
+            if (!duration) {
+                try {
+                    const songDetails: any = await ytmusic.getSong(trackData.pipedId);
+                    if (songDetails && songDetails.duration) {
+                        duration = songDetails.duration;
+                    }
+                } catch (e) {
+                    server.log.warn(`Failed to fetch duration for ${trackData.pipedId}: ${e}`);
+                }
+            }
+
+            if (!track) {
+                track = await server.prisma.track.create({
+                    data: {
+                        pipedId: trackData.pipedId,
+                        title: trackData.title,
+                        artist: artistName,
+                        thumbnailUrl: trackData.thumbnailUrl,
+                        duration: duration || 0
+                    }
+                });
+            } else if (track.duration === 0 && duration > 0) {
+                track = await server.prisma.track.update({
+                    where: { id: track.id },
+                    data: { duration }
+                });
+            }
         }
 
         // Get current max order
@@ -106,29 +140,55 @@ const libraryRoutes: FastifyPluginAsync = async (server) => {
     server.post('/liked', { preValidation: [server.authenticate] }, async (request, reply) => {
         const schema = z.object({
             track: z.object({
-                pipedId: z.string(),
+                id: z.string().optional(),
+                pipedId: z.string().optional(),
                 title: z.string(),
                 artist: z.string().optional(),
                 uploaderName: z.string().optional(),
                 thumbnailUrl: z.string().optional(),
-                duration: z.number()
+                duration: z.number().optional()
             })
         });
         const { track: trackData } = schema.parse(request.body);
 
-        // Map uploaderName to artist if artist is missing
-        const dbTrackData = {
-            ...trackData,
-            artist: trackData.artist || trackData.uploaderName || 'Unknown Artist'
-        };
-        // Remove uploaderName from dbTrackData as it's not in Prisma model
-        delete (dbTrackData as any).uploaderName;
+        const pipedId = trackData.pipedId || trackData.id;
+        if (!pipedId) {
+            return reply.status(400).send({ error: 'Track ID or Piped ID required' });
+        }
 
         // Ensure track exists
-        let track = await server.prisma.track.findUnique({ where: { pipedId: trackData.pipedId } });
-        if (!track) {
-            // @ts-ignore - dbTrackData has correct shape but TS complains about uploaderName deletion
-            track = await server.prisma.track.create({ data: dbTrackData });
+        let track = await server.prisma.track.findUnique({ where: { pipedId } });
+
+        if (!track || track.duration === 0) {
+            let duration = trackData.duration || 0;
+
+            if (!duration) {
+                try {
+                    const songDetails: any = await ytmusic.getSong(pipedId);
+                    if (songDetails && songDetails.duration) {
+                        duration = songDetails.duration;
+                    }
+                } catch (e) {
+                    server.log.warn(`Failed to fetch duration for ${pipedId}: ${e}`);
+                }
+            }
+
+            const dbTrackData = {
+                pipedId,
+                title: trackData.title,
+                artist: trackData.artist || trackData.uploaderName || 'Unknown Artist',
+                thumbnailUrl: trackData.thumbnailUrl,
+                duration: duration
+            };
+
+            if (!track) {
+                track = await server.prisma.track.create({ data: dbTrackData });
+            } else if (track.duration === 0 && duration > 0) {
+                track = await server.prisma.track.update({
+                    where: { id: track.id },
+                    data: { duration }
+                });
+            }
         }
 
         const existingLike = await server.prisma.likedTrack.findUnique({

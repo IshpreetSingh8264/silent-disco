@@ -97,6 +97,20 @@ export default async function homeRoutes(fastify: FastifyInstance) {
 
             // --- GLOBAL SECTIONS (API) ---
 
+            // Initialize YTMusic with Region
+            const ytmusicRegion = new YTMusic();
+            // Map region code if necessary (e.g. 'US' -> 'US', 'IN' -> 'IN')
+            // YTMusic expects ISO 3166-1 alpha-2 country code
+            await ytmusicRegion.initialize({ GL: region, HL: 'en' });
+
+            // Fetch Home Sections (Personalized/Regional)
+            let homeSections: any[] = [];
+            try {
+                homeSections = await ytmusicRegion.getHomeSections();
+            } catch (e) {
+                console.error("Failed to fetch home sections:", e);
+            }
+
             // 4. Trending (Real-time API)
             const trendingCacheKey = `trending:${region}`;
             let trendingItems = [];
@@ -106,12 +120,33 @@ export default async function homeRoutes(fastify: FastifyInstance) {
                 trendingItems = JSON.parse(cachedTrending);
             } else {
                 try {
-                    // ytmusic.getCharts(region) is ideal, but if not supported, search "Top 50 <Region>"
-                    // The library might not support region code in getCharts directly depending on version.
-                    // Let's try a search fallback which is robust.
-                    const query = `Top 50 ${region}`;
-                    const songs = await ytmusic.search(query);
-                    trendingItems = songs.filter((i: any) => i.videoId).map(mapApiItem);
+                    // Find "Trending" or "Top" section
+                    const trendingSection = homeSections.find(s =>
+                        (s.title.toLowerCase().includes('trending') || s.title.toLowerCase().includes('top')) &&
+                        s.contents && s.contents.length > 0
+                    );
+
+                    if (trendingSection) {
+                        // Map Home Section items
+                        trendingItems = trendingSection.contents
+                            .filter((i: any) => i.videoId) // Ensure it's a video/song
+                            .map((item: any) => ({
+                                url: `/api/music/streams/${item.videoId}`,
+                                title: item.name, // Home sections use 'name'
+                                thumbnail: item.thumbnails?.[item.thumbnails.length - 1]?.url || '',
+                                uploaderName: item.artist?.name || 'Unknown Artist',
+                                duration: 0, // Home sections often miss duration, set to 0
+                                pipedId: item.videoId
+                            }));
+                    }
+
+                    // Fallback to search if no section found or empty
+                    if (trendingItems.length === 0) {
+                        const query = `Top 50 ${region}`;
+                        const songs = await ytmusicRegion.search(query);
+                        trendingItems = songs.filter((i: any) => i.videoId).map(mapApiItem);
+                    }
+
                     await redis.set(trendingCacheKey, JSON.stringify(trendingItems), 3600);
                 } catch (e) {
                     console.error("Failed to fetch trending:", e);
@@ -119,7 +154,7 @@ export default async function homeRoutes(fastify: FastifyInstance) {
             }
 
             // 5. New Releases (Real-time API)
-            const newReleasesCacheKey = 'new_releases';
+            const newReleasesCacheKey = `new_releases:${region}`;
             let newReleasesItems = [];
             const cachedNew = await redis.get(newReleasesCacheKey);
 
@@ -127,10 +162,9 @@ export default async function homeRoutes(fastify: FastifyInstance) {
                 newReleasesItems = JSON.parse(cachedNew);
             } else {
                 try {
-                    // Try getNewReleases() if available, else search "New Music"
-                    // ytmusic-api usually has getNewReleases()
-                    // If not, fallback to search
-                    const songs = await ytmusic.search('New Music 2024'); // Fallback search
+                    // For New Releases, Home Sections usually return Albums.
+                    // We want playable Songs. So we'll use Search "New Songs" which is reliable.
+                    const songs = await ytmusicRegion.search('New Songs');
                     newReleasesItems = songs.filter((i: any) => i.videoId).map(mapApiItem);
                     await redis.set(newReleasesCacheKey, JSON.stringify(newReleasesItems), 3600);
                 } catch (e) {

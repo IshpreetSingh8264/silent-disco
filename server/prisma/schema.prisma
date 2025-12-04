@@ -7,93 +7,135 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Enums
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  BLOCKED
+}
+
+enum SignalType {
+  SKIP
+  LIKE
+  DWELL
+  VOLUME
+  CLICK
+  SEARCH
+  OTHER
+}
+
+enum QueueSource {
+  MANUAL
+  SYSTEM
+  AI
+}
+
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  username  String   @unique
-  password  String
-  createdAt DateTime @default(now())
-  
-  hostedRooms Room[] @relation("Host")
+  id          String    @id @default(uuid())
+  email       String    @unique
+  username    String    @unique
+  password    String
+  createdAt   DateTime  @default(now())
+  status      String?   // e.g., ACTIVE, BANNED
+  lastLoginAt DateTime?
+
+  // Relations
+  hostedRooms Room[]       @relation("Host")
   memberOf    RoomMember[]
   playlists   Playlist[]
   likedTracks LikedTrack[]
   history     ListeningHistory[]
-  friends     Friendship[] @relation("UserFriends")
-  friendOf    Friendship[] @relation("FriendUsers")
+  friends     Friendship[]       @relation("UserFriends")
+  friendOf    Friendship[]       @relation("FriendUsers")
   signals     UserSignal[]
   contextLogs ContextLog[]
-  
-  // Enterprise Stats & Queue
-  userQueue   UserQueue[]
-  trackStats  UserTrackStats[]
+
+  // Enterprise stats & queues
+  userQueue  UserQueue[]
+  trackStats UserTrackStats[]
+
+  @@index([createdAt])
 }
 
 model Room {
-  id        String   @id @default(uuid())
-  code      String   @unique
-  name      String
-  hostId    String
-  host      User     @relation("Host", fields: [hostId], references: [id])
-  
-  isPlaying     Boolean @default(false)
+  id             String   @id @default(uuid())
+  code           String   @unique
+  name           String
+  hostId         String
+  host           User     @relation("Host", fields: [hostId], references: [id])
+  isPlaying      Boolean  @default(false)
   currentTrackId String?
-  position      Int     @default(0) // in milliseconds
-  updatedAt     DateTime @updatedAt
+  position       Int      @default(0) // milliseconds
+  updatedAt      DateTime @updatedAt
 
   members RoomMember[]
   queue   RoomQueue[]
+
+  @@index([hostId])
+  @@index([updatedAt])
 }
 
 model RoomMember {
-  id        String   @id @default(uuid())
-  userId    String?
-  user      User?    @relation(fields: [userId], references: [id])
-  roomId    String
-  room      Room     @relation(fields: [roomId], references: [id])
-  joinedAt  DateTime @default(now())
+  id       String   @id @default(uuid())
+  userId   String?
+  user     User?    @relation(fields: [userId], references: [id])
+  roomId   String
+  room     Room     @relation(fields: [roomId], references: [id])
+  joinedAt DateTime @default(now())
+
+  @@index([roomId])
+  @@index([userId])
 }
 
 model Track {
-  id          String   @id @default(uuid())
-  pipedId     String   @unique // The ID from Piped/YouTube
-  title       String
-  artist      String
-  album       String?
+  id           String  @id @default(uuid())
+  pipedId      String  @unique
+  title        String
+  artist       String
+  album        String?
   thumbnailUrl String?
-  duration    Int      // in seconds
+  duration     Int // in seconds
 
+  // relations
   playlists PlaylistTrack[]
   queues    RoomQueue[]
   likedBy   LikedTrack[]
   history   ListeningHistory[]
   signals   UserSignal[]
   features  TrackFeature?
-  
-  // Enterprise Stats & Queue
-  globalPlayCount Int @default(0)
+
+  // Stats & queues
+  globalPlayCount Int                @default(0)
   userStats       UserTrackStats[]
   regionStats     TrackRegionStats[]
   userQueues      UserQueue[]
+
+  @@index([title])
+  @@index([artist])
+  @@index([globalPlayCount])
 }
 
 model LikedTrack {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  trackId   String
-  track     Track    @relation(fields: [trackId], references: [id])
-  likedAt   DateTime @default(now())
+  id      String   @id @default(uuid())
+  userId  String
+  user    User     @relation(fields: [userId], references: [id])
+  trackId String
+  track   Track    @relation(fields: [trackId], references: [id])
+  likedAt DateTime @default(now())
 
   @@unique([userId, trackId])
+  @@index([userId])
+  @@index([trackId])
 }
 
 model Playlist {
-  id        String   @id @default(uuid())
-  name      String
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  tracks    PlaylistTrack[]
+  id     String          @id @default(uuid())
+  name   String
+  userId String
+  user   User            @relation(fields: [userId], references: [id])
+  tracks PlaylistTrack[]
+
+  @@index([userId])
 }
 
 model PlaylistTrack {
@@ -102,7 +144,11 @@ model PlaylistTrack {
   playlist   Playlist @relation(fields: [playlistId], references: [id])
   trackId    String
   track      Track    @relation(fields: [trackId], references: [id])
-  order      Int
+  order      Int // 'order' is a reserved word in some DBs; keep as quoted alias
+
+  @@unique([playlistId, trackId])
+  @@index([playlistId, order])
+  @@index([trackId])
 }
 
 model RoomQueue {
@@ -113,48 +159,63 @@ model RoomQueue {
   track     Track    @relation(fields: [trackId], references: [id])
   order     Int
   addedBy   String? // userId
-  isPlayed  Boolean @default(false)
+  isPlayed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([roomId, order])
+  @@index([trackId])
+  @@index([createdAt])
 }
 
 model ListeningHistory {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  trackId   String
-  track     Track    @relation(fields: [trackId], references: [id])
-  playedAt  DateTime @default(now())
-  durationPlayed Int? // Duration played in seconds
-  context   String?  // e.g., "playlist", "search", "radio"
+  // This table will be partitioned (see notes below)
+  id             String   @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+  trackId        String
+  track          Track    @relation(fields: [trackId], references: [id])
+  playedAt       DateTime @default(now())
+  durationPlayed Int? // seconds
+  context        String? // e.g., "playlist", "search", "radio"
+  createdAt      DateTime @default(now())
 
+  @@id([id, playedAt], map: "ListeningHistory_partitioned_pkey")
   @@index([userId, playedAt])
+  @@index([trackId, playedAt])
+  @@index([playedAt])
 }
 
 model Friendship {
-  id        String   @id @default(uuid())
+  id        String           @id @default(uuid())
   userId    String
-  user      User     @relation("UserFriends", fields: [userId], references: [id])
+  user      User             @relation("UserFriends", fields: [userId], references: [id])
   friendId  String
-  friend    User     @relation("FriendUsers", fields: [friendId], references: [id])
-  status    String   @default("PENDING") // PENDING, ACCEPTED, BLOCKED
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  friend    User             @relation("FriendUsers", fields: [friendId], references: [id])
+  status    FriendshipStatus @default(PENDING) // PENDING, ACCEPTED, BLOCKED
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
 
   @@unique([userId, friendId])
+  @@index([userId, status])
+  @@index([friendId, status])
 }
 
 model UserSignal {
-  id        String   @id @default(uuid())
+  // This table will be partitioned (see notes below)
+  id        String     @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id])
+  user      User       @relation(fields: [userId], references: [id])
   trackId   String
-  track     Track    @relation(fields: [trackId], references: [id])
-  type      String   // SKIP, LIKE, DWELL, VOLUME, CLICK, SEARCH, etc.
+  track     Track      @relation(fields: [trackId], references: [id])
+  type      SignalType   // SKIP, LIKE, DWELL, VOLUME, CLICK, SEARCH, etc.
   value     Float?   // e.g., dwell time in seconds, volume level, rating
   metadata  Json?    // Extra context (device, location, etc.)
   createdAt DateTime @default(now())
 
-  @@index([userId, type])
-  @@index([trackId])
+  @@id([id, createdAt], map: "UserSignal_partitioned_pkey")
+  @@index([userId, type, createdAt])
+  @@index([trackId, type, createdAt])
+  @@index([createdAt])
 }
 
 model TrackFeature {
@@ -179,13 +240,18 @@ model TrackFeature {
   embedding      Json? // Vector embedding (list of floats)
   
   updatedAt      DateTime @updatedAt
+
+  @@index([bpm])
+  @@index([energy])
+  @@index([danceability])
 }
 
 model ContextLog {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  timestamp DateTime @default(now())
+  // Partition this (see notes)
+  id           String   @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  timestamp    DateTime @default(now())
   
   // Context Signals
   locationType String? // home, office, gym
@@ -196,6 +262,10 @@ model ContextLog {
   weather      String? // sunny, rainy (future)
   
   metadata     Json?
+
+  @@id([id, timestamp], map: "ContextLog_partitioned_pkey")
+  @@index([userId, timestamp])
+  @@index([timestamp])
 }
 
 model UserQueue {

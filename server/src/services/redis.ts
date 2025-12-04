@@ -58,6 +58,21 @@ class RedisService {
         if (!this.client) return;
         await this.client.flushall();
     }
+
+    async lpush(key: string, value: string): Promise<void> {
+        if (!this.client) return;
+        await this.client.lpush(key, value);
+    }
+
+    async rpop(key: string): Promise<string | null> {
+        if (!this.client) return null;
+        return this.client.rpop(key);
+    }
+
+    pipeline() {
+        if (!this.client) throw new Error('Redis not connected');
+        return this.client.pipeline();
+    }
 }
 
 export const redis = new RedisService();

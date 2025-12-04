@@ -61,16 +61,20 @@ const Shelf = ({ title, items, onPlay }: { title: string, items: any[], onPlay: 
             <h2 className="text-3xl font-bold tracking-tight">{title}</h2>
             <div className="flex space-x-6 overflow-x-auto pb-4 scrollbar-none snap-x snap-mandatory" style={{ scrollbarWidth: 'none' }}>
                 {items.map((item) => (
-                    <div key={item.pipedId || item.url} className="flex-none w-48 group relative snap-start">
+                    <div
+                        key={item.pipedId || item.url}
+                        className="flex-none w-48 group relative snap-start cursor-pointer"
+                        onClick={() => onPlay(item)}
+                    >
                         <div className="aspect-square relative rounded-lg overflow-hidden shadow-lg bg-retro-surface mb-3">
                             <img src={item.thumbnail} alt={item.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                <button onClick={() => onPlay(item)} className="p-3 bg-white text-black rounded-full hover:scale-110 transition-transform shadow-xl">
+                                <button className="p-3 bg-white text-black rounded-full hover:scale-110 transition-transform shadow-xl">
                                     <Play size={24} fill="black" className="ml-1" />
                                 </button>
                             </div>
                         </div>
-                        <h3 className="font-bold text-white truncate text-sm">{item.title}</h3>
+                        <h3 className="font-bold text-white truncate text-sm group-hover:text-retro-primary transition-colors">{item.title}</h3>
                         <p className="text-xs text-gray-400 truncate">{item.uploaderName}</p>
                     </div>
                 ))}

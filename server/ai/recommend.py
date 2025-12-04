@@ -37,15 +37,34 @@ def recommend(user_id, context, recent_history, limit=20):
     # 3. Ranking (Heuristic for now)
     random.shuffle(final_candidates)
     
+    # Helper to parse duration
+    def parse_duration(d):
+        if isinstance(d, int):
+            return d
+        if isinstance(d, str):
+            parts = d.split(':')
+            if len(parts) == 2:
+                return int(parts[0]) * 60 + int(parts[1])
+            elif len(parts) == 3:
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        return 0
+
     # Format for response
     recommendations = []
     for track in final_candidates[:limit]:
+        # Try multiple keys for duration
+        duration = track.get('length_seconds')
+        if not duration:
+            duration = track.get('duration')
+        if not duration:
+            duration = track.get('length')
+            
         recommendations.append({
             "pipedId": track['videoId'],
             "title": track['title'],
             "thumbnail": track['thumbnail'][0]['url'] if track.get('thumbnail') else '',
             "uploaderName": track['artists'][0]['name'] if track.get('artists') else 'Unknown',
-            "duration": track.get('length_seconds', 0)
+            "duration": parse_duration(duration)
         })
         
     return recommendations

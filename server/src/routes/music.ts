@@ -11,6 +11,7 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
 
     // Helper to parse duration string "MM:SS" to seconds
     const parseDuration = (duration: string | number): number => {
+        // console.log(`[parseDuration] Input: ${duration} (${typeof duration})`);
         if (typeof duration === 'number') return duration;
         if (!duration) return 0;
         const parts = duration.split(':').map(Number);
@@ -20,14 +21,16 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
     };
 
     // Helper to map YTMusic items to our app's format
-    const mapItem = (item: any) => ({
-        url: `/api/music/streams/${item.videoId}`, // Use relative URL with proxy
-        title: item.name,
-        thumbnail: item.thumbnails?.[item.thumbnails.length - 1]?.url || '',
-        uploaderName: item.artist?.name || 'Unknown Artist',
-        duration: parseDuration(item.duration),
-        pipedId: item.videoId
-    });
+    const mapItem = (item: any) => {
+        return {
+            url: `/api/music/streams/${item.videoId}`, // Use relative URL with proxy
+            title: item.name,
+            thumbnail: item.thumbnails?.[item.thumbnails.length - 1]?.url || '',
+            uploaderName: item.artist?.name || 'Unknown Artist',
+            duration: parseDuration(item.duration),
+            pipedId: item.videoId
+        };
+    };
 
     server.get('/search', async (request, reply) => {
         const schema = z.object({
@@ -135,7 +138,7 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         }
     });
 
-    server.get('/recommendations', async (request, reply) => {
+    server.get('/recommendations', { preValidation: [server.authenticate] }, async (request, reply) => {
         const schema = z.object({
             seedTrackId: z.string(),
             seedTrackTitle: z.string().optional(),
@@ -145,7 +148,7 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         });
 
         const { seedTrackId, seedTrackTitle, seedTrackArtist, historyIds, limit = 20 } = schema.parse(request.query);
-        const cacheKey = `recommendations:${seedTrackId}:${historyIds || 'none'}:v5`;
+        const cacheKey = `recommendations:${seedTrackId}:${historyIds || 'none'}:v9`;
 
         try {
             const cached = await redis.get(cacheKey);
@@ -281,6 +284,7 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
 
             if (items.length > 0) {
                 await redis.set(cacheKey, JSON.stringify(items), 3600);
+                console.log('[Recommendations] Returning items. First item:', JSON.stringify(items[0], null, 2));
             }
 
             return items;

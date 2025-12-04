@@ -1,19 +1,30 @@
-import React, { useState, useEffect } from 'react';
-import { Search as SearchIcon, Play, Plus, ListPlus } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Play, Plus, ListPlus } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { usePlayerStore, type Track } from '../store/usePlayerStore';
 
 export const Search = () => {
-    const [query, setQuery] = useState('');
     const [results, setResults] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
     const { token } = useAuthStore();
     const { playTrack, addToQueue } = usePlayerStore();
+    const location = useLocation();
 
     // Playlist Modal State
     const [showPlaylistModal, setShowPlaylistModal] = useState(false);
     const [selectedTrack, setSelectedTrack] = useState<any>(null);
     const [playlists, setPlaylists] = useState<any[]>([]);
+
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const q = params.get('q');
+        if (q) {
+            performSearch(q);
+        } else {
+            setResults([]);
+        }
+    }, [location.search]);
 
     useEffect(() => {
         if (showPlaylistModal) {
@@ -23,7 +34,7 @@ export const Search = () => {
 
     const fetchPlaylists = async () => {
         try {
-            const res = await fetch('http://localhost:3000/api/library/playlists', {
+            const res = await fetch('/api/library/playlists', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             const data = await res.json();
@@ -42,22 +53,19 @@ export const Search = () => {
         if (!selectedTrack) return;
 
         const trackData = {
-            pipedId: selectedTrack.url.split('/streams/')[1] || selectedTrack.url, // Fallback if url is just ID
+            pipedId: selectedTrack.url.split('/streams/')[1] || selectedTrack.url,
             title: selectedTrack.title,
             artist: selectedTrack.uploaderName,
             thumbnailUrl: selectedTrack.thumbnail,
             duration: selectedTrack.duration
         };
 
-        // If URL is full URL, extract ID. Piped search returns /streams/ID usually? 
-        // Actually Piped search items usually have `url` as relative path like `/watch?v=ID`
-        // Let's inspect what Piped returns. Usually it's `url: "/watch?v=..."`
         if (selectedTrack.url.includes('watch?v=')) {
             trackData.pipedId = selectedTrack.url.split('v=')[1];
         }
 
         try {
-            await fetch(`http://localhost:3000/api/library/playlists/${playlistId}/tracks`, {
+            await fetch(`/api/library/playlists/${playlistId}/tracks`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -67,19 +75,17 @@ export const Search = () => {
             });
             setShowPlaylistModal(false);
             setSelectedTrack(null);
-            // Optionally show success toast
         } catch (err) {
             console.error(err);
         }
     };
 
-    const handleSearch = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!query.trim()) return;
+    const performSearch = async (searchQuery: string) => {
+        if (!searchQuery.trim()) return;
 
         setLoading(true);
         try {
-            const res = await fetch(`http://localhost:3000/api/music/search?q=${encodeURIComponent(query)}&filter=music_songs`, {
+            const res = await fetch(`/api/music/search?q=${encodeURIComponent(searchQuery)}&filter=music_songs`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
             const data = await res.json();
@@ -104,25 +110,18 @@ export const Search = () => {
 
     return (
         <div className="space-y-6">
-            <h2 className="text-3xl font-bold tracking-tight">Search</h2>
-
-            <form onSubmit={handleSearch} className="relative">
-                <SearchIcon className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <input
-                    type="text"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="What do you want to listen to?"
-                    className="w-full bg-retro-surface border border-white/10 rounded-full py-4 pl-12 pr-6 text-white focus:outline-none focus:border-retro-primary focus:ring-1 focus:ring-retro-primary transition-all"
-                />
-            </form>
+            <h2 className="text-3xl font-bold tracking-tight">Search Results</h2>
 
             <div className="space-y-4">
                 {loading ? (
                     <div className="text-center text-gray-400 py-10">Searching...</div>
                 ) : (
                     results.map((item) => (
-                        <div key={item.url} className="flex items-center justify-between p-4 bg-retro-surface/50 rounded-lg hover:bg-retro-surface transition-colors group">
+                        <div
+                            key={item.url}
+                            className="flex items-center justify-between p-4 bg-retro-surface/50 rounded-lg hover:bg-retro-surface transition-colors group cursor-pointer"
+                            onClick={() => handlePlay(item)}
+                        >
                             <div className="flex items-center space-x-4">
                                 <img src={item.thumbnail} alt={item.title} className="w-12 h-12 rounded object-cover" />
                                 <div>
@@ -132,13 +131,24 @@ export const Search = () => {
                             </div>
 
                             <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => handlePlay(item)} className="p-2 hover:bg-retro-primary hover:text-black rounded-full transition-colors">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handlePlay(item); }}
+                                    className="p-2 hover:bg-retro-primary hover:text-black rounded-full transition-colors"
+                                >
                                     <Play size={20} />
                                 </button>
-                                <button onClick={() => addToQueue(item)} className="p-2 hover:bg-white/10 rounded-full transition-colors" title="Add to Queue">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); addToQueue(item); }}
+                                    className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                                    title="Add to Queue"
+                                >
                                     <Plus size={20} />
                                 </button>
-                                <button onClick={() => openPlaylistModal(item)} className="p-2 hover:bg-white/10 rounded-full transition-colors" title="Add to Playlist">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); openPlaylistModal(item); }}
+                                    className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                                    title="Add to Playlist"
+                                >
                                     <ListPlus size={20} />
                                 </button>
                             </div>

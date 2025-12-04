@@ -1,8 +1,10 @@
+import { useRef, useEffect } from 'react';
 import { usePlayerStore } from '../store/usePlayerStore';
 import { X, Trash2, Play, History, ListMusic } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import toast from 'react-hot-toast';
 import { useShallow } from 'zustand/react/shallow';
+import { useLocation } from 'react-router-dom';
 
 interface QueueProps {
     isOpen: boolean;
@@ -15,9 +17,31 @@ export const Queue = ({ isOpen, onClose }: QueueProps) => {
         useShallow(state => [...state.queueExplicit, ...state.queueSystem, ...state.queueAI])
     );
     const { socket } = useAuthStore();
+    const location = useLocation();
     const roomCode = location.pathname.startsWith('/rooms/') ? location.pathname.split('/')[2] : null;
+    const queueRef = useRef<HTMLDivElement>(null);
+
+    // Click outside to close
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (queueRef.current && !queueRef.current.contains(event.target as Node)) {
+                onClose();
+            }
+        };
+        if (isOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isOpen, onClose]);
 
     if (!isOpen) return null;
+
+    const formatDuration = (seconds?: number) => {
+        if (!seconds) return '--:--';
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
 
     const handlePlay = (track: any, isQueueItem = false) => {
         if (isQueueItem) {
@@ -56,7 +80,7 @@ export const Queue = ({ isOpen, onClose }: QueueProps) => {
     const upNext = queue.filter(t => !t.isPlayed);
 
     return (
-        <div className="fixed inset-y-0 right-0 w-full md:w-[450px] bg-black/60 backdrop-blur-2xl border-l border-white/10 shadow-2xl z-50 transform transition-transform duration-300 ease-in-out flex flex-col font-sans">
+        <div ref={queueRef} className="fixed inset-y-0 right-0 w-full md:w-[450px] bg-black/60 backdrop-blur-2xl border-l border-white/10 shadow-2xl z-50 transform transition-transform duration-300 ease-in-out flex flex-col font-sans">
             {/* Header */}
             <div className="p-6 border-b border-white/10 flex items-center justify-between bg-white/5 backdrop-blur-md">
                 <div className="flex items-center space-x-3">
@@ -91,7 +115,10 @@ export const Queue = ({ isOpen, onClose }: QueueProps) => {
                             <img src={currentTrack.thumbnail} alt="" className="w-16 h-16 rounded-lg object-cover shadow-md z-10" />
                             <div className="flex-1 min-w-0 z-10">
                                 <h4 className="font-bold text-white truncate text-lg">{currentTrack.title}</h4>
-                                <p className="text-sm text-gray-300 truncate">{currentTrack.uploaderName}</p>
+                                <p className="text-sm text-gray-300 truncate">{currentTrack.artist || currentTrack.uploaderName || 'Unknown Artist'}</p>
+                            </div>
+                            <div className="text-xs text-gray-400 font-mono z-10 mr-2">
+                                {formatDuration(currentTrack.duration)}
                             </div>
                             <div className="w-6 h-6 flex items-center justify-center z-10">
                                 <div className="flex space-x-1">
@@ -127,7 +154,7 @@ export const Queue = ({ isOpen, onClose }: QueueProps) => {
                                 <div
                                     key={`next-${i}`}
                                     className="group flex items-center space-x-3 p-2 rounded-lg hover:bg-white/10 transition-all cursor-pointer border border-transparent hover:border-white/5"
-                                    onClick={() => handlePlay(track)}
+                                    onClick={() => handlePlay(track, true)}
                                 >
                                     <div className="relative w-12 h-12 flex-shrink-0">
                                         <img src={track.thumbnail} alt="" className="w-full h-full rounded-md object-cover shadow-sm" />
@@ -137,7 +164,10 @@ export const Queue = ({ isOpen, onClose }: QueueProps) => {
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <h4 className="font-medium truncate text-white text-sm group-hover:text-retro-primary transition-colors">{track.title}</h4>
-                                        <p className="text-xs text-gray-400 truncate">{track.uploaderName}</p>
+                                        <p className="text-xs text-gray-400 truncate">{track.artist || track.uploaderName || 'Unknown Artist'}</p>
+                                    </div>
+                                    <div className="text-xs text-gray-500 font-mono group-hover:text-gray-300">
+                                        {formatDuration(track.duration)}
                                     </div>
                                     <button
                                         onClick={(e) => handleRemove(e, track)}
@@ -170,7 +200,10 @@ export const Queue = ({ isOpen, onClose }: QueueProps) => {
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <h4 className="font-medium truncate text-white text-sm">{track.title}</h4>
-                                        <p className="text-xs text-gray-400 truncate">{track.uploaderName}</p>
+                                        <p className="text-xs text-gray-400 truncate">{track.artist || track.uploaderName || 'Unknown Artist'}</p>
+                                    </div>
+                                    <div className="text-xs text-gray-500 font-mono">
+                                        {formatDuration(track.duration)}
                                     </div>
                                 </div>
                             ))}

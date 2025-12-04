@@ -100,7 +100,8 @@ const Shelf = ({ title, items, onPlay, onAddToQueue }: ShelfProps) => {
                 {items.map((item) => (
                     <div
                         key={item.pipedId || item.url}
-                        className="flex-none w-48 group relative snap-start"
+                        className="flex-none w-48 group relative snap-start cursor-pointer"
+                        onClick={() => onPlay(item)}
                     >
                         <div className="aspect-square relative rounded-lg overflow-hidden shadow-lg bg-retro-surface mb-3">
                             <img
@@ -110,13 +111,12 @@ const Shelf = ({ title, items, onPlay, onAddToQueue }: ShelfProps) => {
                             />
                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-2">
                                 <button
-                                    onClick={() => onPlay(item)}
                                     className="p-3 bg-white text-black rounded-full hover:scale-110 transition-transform shadow-xl"
                                 >
                                     <Play size={24} fill="black" className="ml-1" />
                                 </button>
                                 <button
-                                    onClick={() => onAddToQueue(item)}
+                                    onClick={(e) => { e.stopPropagation(); onAddToQueue(item); }}
                                     className="p-3 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors"
                                 >
                                     <Plus size={20} />
@@ -124,8 +124,8 @@ const Shelf = ({ title, items, onPlay, onAddToQueue }: ShelfProps) => {
                             </div>
                         </div>
 
-                        <h3 className="font-bold text-white truncate text-sm hover:underline cursor-pointer">{item.title}</h3>
-                        <p className="text-xs text-gray-400 truncate hover:text-white cursor-pointer">{item.uploaderName}</p>
+                        <h3 className="font-bold text-white truncate text-sm group-hover:text-retro-primary transition-colors">{item.title}</h3>
+                        <p className="text-xs text-gray-400 truncate group-hover:text-white transition-colors">{item.uploaderName}</p>
                     </div>
                 ))}
             </div>
