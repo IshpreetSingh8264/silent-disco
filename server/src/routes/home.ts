@@ -47,10 +47,26 @@ export default async function homeRoutes(fastify: FastifyInstance) {
         preValidation: [fastify.authenticate]
     }, async (req, reply) => {
         const userId = (req.user as any).id;
-        const { region = 'US' } = (req.query as any); // Default to US
+        const { region = 'US', category } = (req.query as any);
 
         try {
-            // --- PERSONAL SECTIONS (DB) ---
+            // Initialize YTMusic with Region
+            const ytmusicRegion = new YTMusic();
+            await ytmusicRegion.initialize({ GL: region, HL: 'en' });
+
+            // --- CATEGORY SEARCH ---
+            if (category) {
+                // If a category is selected (e.g. "Energize"), search for it
+                const query = `${category} songs`;
+                const songs = await ytmusicRegion.search(query);
+                const items = songs.filter((i: any) => i.videoId).map(mapApiItem);
+                return [{
+                    title: category,
+                    items: items
+                }];
+            }
+
+            // --- DEFAULT HOME ---
 
             // 1. Listen Again (History)
             const history = await fastify.prisma.listeningHistory.findMany({
@@ -61,15 +77,7 @@ export default async function homeRoutes(fastify: FastifyInstance) {
                 include: { track: { include: { artistRel: true } } }
             });
 
-            // 2. Your Playlists
-            const playlists = await fastify.prisma.playlist.findMany({
-                where: { userId },
-                take: 10,
-                include: { _count: { select: { tracks: true } } }
-            });
-
-            // 3. Quick Picks (Stats + API Enrichment)
-            // Get top tracks from DB stats
+            // 2. Quick Picks (Stats)
             const topStats = await fastify.prisma.userTrackStats.findMany({
                 where: { userId },
                 orderBy: { playCount: 'desc' },
@@ -79,10 +87,6 @@ export default async function homeRoutes(fastify: FastifyInstance) {
 
             let quickPicksItems: any[] = [];
             if (topStats.length > 0) {
-                // If we have stats, use them. 
-                // OPTIONAL: We could also fetch "Similar to" these tracks from API for a better "Quick Picks" mix.
-                // For now, let's just show the top tracks themselves as "Quick Picks" (Favorites).
-                // Map DB tracks to frontend format
                 quickPicksItems = topStats.map(s => mapDbTrack(s.track));
             } else {
                 // Cold Start: Fetch generic "Quick Picks" from API
@@ -97,14 +101,6 @@ export default async function homeRoutes(fastify: FastifyInstance) {
                 }
             }
 
-            // --- GLOBAL SECTIONS (API) ---
-
-            // Initialize YTMusic with Region
-            const ytmusicRegion = new YTMusic();
-            // Map region code if necessary (e.g. 'US' -> 'US', 'IN' -> 'IN')
-            // YTMusic expects ISO 3166-1 alpha-2 country code
-            await ytmusicRegion.initialize({ GL: region, HL: 'en' });
-
             // Fetch Home Sections (Personalized/Regional)
             let homeSections: any[] = [];
             try {
@@ -113,112 +109,98 @@ export default async function homeRoutes(fastify: FastifyInstance) {
                 console.error("Failed to fetch home sections:", e);
             }
 
-            // 4. Trending (Real-time API)
-            const trendingCacheKey = `trending:${region}`;
-            let trendingItems = [];
-            const cachedTrending = await redis.get(trendingCacheKey);
+            // 3. Trending (From Home Sections)
+            let trendingItems: any[] = [];
+            // Look for "Top music videos", "Trending", "Charts"
+            const trendingSection = homeSections.find(s =>
+                /trending|top music videos|charts/i.test(s.title) && s.contents?.length > 0
+            );
 
-            if (cachedTrending) {
-                trendingItems = JSON.parse(cachedTrending);
-            } else {
-                try {
-                    // Find "Trending" or "Top" section
-                    const trendingSection = homeSections.find(s =>
-                        (s.title.toLowerCase().includes('trending') || s.title.toLowerCase().includes('top')) &&
-                        s.contents && s.contents.length > 0
-                    );
+            if (trendingSection) {
+                trendingItems = trendingSection.contents
+                    .filter((i: any) => i.videoId)
+                    .map(mapApiItem);
+            }
 
-                    if (trendingSection) {
-                        // Map Home Section items
-                        trendingItems = trendingSection.contents
-                            .filter((i: any) => i.videoId) // Ensure it's a video/song
-                            .map((item: any) => ({
-                                url: `/api/music/streams/${item.videoId}`,
-                                title: item.name, // Home sections use 'name'
-                                thumbnail: item.thumbnails?.[item.thumbnails.length - 1]?.url || '',
-                                uploaderName: item.artist?.name || 'Unknown Artist',
-                                duration: 0, // Home sections often miss duration, set to 0
-                                pipedId: item.videoId
-                            }));
-                    }
-
-                    // Fallback to search if no section found or empty
-                    if (trendingItems.length === 0) {
-                        const query = `Top 50 ${region}`;
-                        const songs = await ytmusicRegion.search(query);
-                        trendingItems = songs.filter((i: any) => i.videoId).map(mapApiItem);
-                    }
-
-                    await redis.set(trendingCacheKey, JSON.stringify(trendingItems), 3600);
-                } catch (e) {
-                    console.error("Failed to fetch trending:", e);
+            // Fallback for Trending if not found in sections
+            if (trendingItems.length === 0) {
+                const cacheKey = `trending:${region}`;
+                const cached = await redis.get(cacheKey);
+                if (cached) {
+                    trendingItems = JSON.parse(cached);
+                } else {
+                    // Search for "Top 50 [Region]" as fallback
+                    const query = `Top 50 ${region}`;
+                    const songs = await ytmusicRegion.search(query);
+                    trendingItems = songs.filter((i: any) => i.videoId).map(mapApiItem);
+                    await redis.set(cacheKey, JSON.stringify(trendingItems), 3600);
                 }
             }
 
-            // 5. New Releases (Real-time API)
-            const newReleasesCacheKey = `new_releases:${region}`;
-            let newReleasesItems = [];
-            const cachedNew = await redis.get(newReleasesCacheKey);
+            // 4. New Releases (From Home Sections)
+            let newReleasesItems: any[] = [];
+            const newReleasesSection = homeSections.find(s =>
+                /new releases/i.test(s.title) && s.contents?.length > 0
+            );
 
-            if (cachedNew) {
-                newReleasesItems = JSON.parse(cachedNew);
+            if (newReleasesSection) {
+                // New Releases are often Albums/Singles. We map them.
+                newReleasesItems = newReleasesSection.contents.map((item: any) => {
+                    const id = item.browseId || item.albumId || item.playlistId;
+                    if ((item.type === 'ALBUM' || item.type === 'SINGLE') && id) {
+                        return {
+                            id: id,
+                            pipedId: id,
+                            title: item.title || item.name,
+                            thumbnail: item.thumbnails?.[item.thumbnails.length - 1]?.url || '',
+                            uploaderName: item.artist?.name || item.subtitle || 'Unknown',
+                            type: 'album',
+                            url: `/library/playlist/${id}`
+                        };
+                    } else if (item.videoId) {
+                        return mapApiItem(item);
+                    }
+                    return null;
+                }).filter(Boolean);
             } else {
-                try {
-                    // For New Releases, Home Sections usually return Albums.
-                    // We want playable Songs. So we'll use Search "New Songs" which is reliable.
+                // Fallback: Search "New Songs" (less accurate but better than nothing)
+                const cacheKey = `new_releases:${region}`;
+                const cached = await redis.get(cacheKey);
+                if (cached) {
+                    newReleasesItems = JSON.parse(cached);
+                } else {
                     const songs = await ytmusicRegion.search('New Songs');
                     newReleasesItems = songs.filter((i: any) => i.videoId).map(mapApiItem);
-                    await redis.set(newReleasesCacheKey, JSON.stringify(newReleasesItems), 3600);
-                } catch (e) {
-                    console.error("Failed to fetch new releases:", e);
+                    await redis.set(cacheKey, JSON.stringify(newReleasesItems), 3600);
                 }
             }
 
-            // --- ENRICHMENT LOGIC ---
-            // Check if any personal tracks (history/stats) are missing thumbnails
+            // --- ENRICHMENT (Thumbnails) ---
+            // ... (Keep existing enrichment logic for history/stats) ...
             const tracksToEnrich = [
                 ...history.map(h => h.track),
                 ...topStats.map(s => s.track)
             ].filter(t => !t.thumbnailUrl || t.thumbnailUrl === '');
 
-            // Deduplicate track IDs
             const uniqueTrackIds = Array.from(new Set(tracksToEnrich.map(t => t.id)));
             const enrichedThumbnails = new Map<string, string>();
 
             if (uniqueTrackIds.length > 0) {
-                console.log(`Enriching ${uniqueTrackIds.length} tracks with missing thumbnails...`);
                 await Promise.all(uniqueTrackIds.map(async (id) => {
                     try {
-                        // Find the track object (any instance) to get pipedId
                         const track = tracksToEnrich.find(t => t.id === id);
                         if (!track) return;
-
                         const song = await ytmusic.getSong(track.pipedId);
                         if (song && song.thumbnails && song.thumbnails.length > 0) {
                             const newThumbnail = song.thumbnails[song.thumbnails.length - 1].url;
-                            // Update DB
-                            await fastify.prisma.track.update({
-                                where: { id },
-                                data: { thumbnailUrl: newThumbnail }
-                            });
-                            // Store in Map
+                            await fastify.prisma.track.update({ where: { id }, data: { thumbnailUrl: newThumbnail } });
                             enrichedThumbnails.set(id, newThumbnail);
                         }
-                    } catch (err) {
-                        console.error(`Failed to enrich track ${id}:`, err);
-                    }
+                    } catch (err) { }
                 }));
             }
 
-            // Helper to get thumbnail (from Map, or Track, or Placeholder)
-            const getThumbnail = (track: any) => {
-                return enrichedThumbnails.get(track.id) || track.thumbnailUrl || '';
-            };
-
-            // Update mapDbTrack to use the new helper if needed, 
-            // but since mapDbTrack is defined above, we can just manually map here or redefine it.
-            // Let's just manually map for the shelves to ensure we use the enriched data.
-
+            const getThumbnail = (track: any) => enrichedThumbnails.get(track.id) || track.thumbnailUrl || '';
             const mapEnrichedTrack = (track: any) => ({
                 url: `/api/music/streams/${track.pipedId}`,
                 title: track.title,
@@ -227,79 +209,59 @@ export default async function homeRoutes(fastify: FastifyInstance) {
                 duration: track.duration,
                 pipedId: track.pipedId,
                 id: track.pipedId,
-                artistId: track.artistRel?.pipedId
+                artistId: track.artistRel?.pipedId,
+                type: 'song'
             });
 
             // --- ASSEMBLE SHELVES ---
             const shelves = [];
 
             if (quickPicksItems.length > 0) {
-                // Re-map Quick Picks using enriched data
-                if (topStats.length > 0) {
-                    quickPicksItems = topStats.map(s => mapEnrichedTrack(s.track));
-                }
+                if (topStats.length > 0) quickPicksItems = topStats.map(s => mapEnrichedTrack(s.track));
                 shelves.push({ title: "Quick Picks", items: quickPicksItems });
             }
 
             if (history.length > 0) {
-                // Re-map history using enriched data
                 shelves.push({ title: "Listen Again", items: history.map(h => mapEnrichedTrack(h.track)) });
             }
 
             if (trendingItems.length > 0) {
-                shelves.push({ title: `Trending in ${region}`, items: trendingItems });
+                shelves.push({ title: trendingSection ? trendingSection.title : `Trending in ${region}`, items: trendingItems });
             }
 
             if (newReleasesItems.length > 0) {
                 shelves.push({ title: "New Releases", items: newReleasesItems });
             }
 
-            // 6. Popular Public Playlists
-            const publicPlaylists = await fastify.prisma.playlist.findMany({
-                where: { OR: [{ isPublic: true }, { isSystem: true }] },
-                orderBy: { playCount: 'desc' },
-                take: 10,
-                include: { _count: { select: { tracks: true } } }
-            });
+            // Add other sections from Home Sections (e.g. "Moods", "Playlists")
+            // Filter out sections we already used or don't want
+            const otherSections = homeSections.filter(s =>
+                !/trending|top music videos|charts|new releases/i.test(s.title) &&
+                s.contents?.length > 0
+            ).slice(0, 5); // Take top 5 other sections
 
-            if (publicPlaylists.length > 0) {
-                shelves.push({
-                    title: "Popular Public Playlists",
-                    items: publicPlaylists.map(p => ({
-                        id: p.id,
-                        title: p.name,
-                        thumbnail: p.thumbnailUrl || '',
-                        uploaderName: `${p._count.tracks} tracks`,
-                        type: 'playlist',
-                        url: `/library/playlist/${p.id}` // Frontend URL
-                    }))
-                });
-            }
-
-            // 7. Because you listened to... (Artist Recs)
-            // Pick a random artist from top stats
-            if (topStats.length > 0) {
-                const randomStat = topStats[Math.floor(Math.random() * Math.min(topStats.length, 5))];
-                const artistName = randomStat.track.artist;
-                if (artistName) {
-                    try {
-                        // Fetch similar songs or artist top songs
-                        // For now, let's search for "Similar to [Artist]" or just more from them
-                        const songs = await ytmusicRegion.search(`Songs similar to ${artistName}`);
-                        const recItems = songs.filter((i: any) => i.videoId).map(mapApiItem);
-                        if (recItems.length > 0) {
-                            shelves.push({ title: `Because you listened to ${artistName}`, items: recItems });
-                        }
-                    } catch (e) {
-                        console.error("Failed to fetch artist recs:", e);
+            otherSections.forEach(section => {
+                const items = section.contents.map((item: any) => {
+                    const id = item.browseId || item.albumId || item.playlistId;
+                    if ((item.type === 'PLAYLIST' || item.type === 'ALBUM') && id) {
+                        return {
+                            id: id,
+                            title: item.title || item.name,
+                            thumbnail: item.thumbnails?.[item.thumbnails.length - 1]?.url || '',
+                            uploaderName: item.subtitle || item.artist?.name || 'YouTube Music',
+                            type: item.type.toLowerCase(),
+                            url: `/library/playlist/${id}`
+                        };
+                    } else if (item.videoId) {
+                        return mapApiItem(item);
                     }
-                }
-            }
+                    return null;
+                }).filter(Boolean);
 
-            // Add Playlists if needed, or handle separately
-            // shelves.push({ title: "Your Playlists", items: playlists... }) 
-            // Playlists usually have a different UI card, so maybe send them as a separate field?
-            // For now, adhering to the "Shelves" structure for tracks.
+                if (items.length > 0) {
+                    shelves.push({ title: section.title, items });
+                }
+            });
 
             return shelves;
 

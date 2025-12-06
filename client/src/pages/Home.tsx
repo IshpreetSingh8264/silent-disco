@@ -1,16 +1,26 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Plus, ChevronLeft, ChevronRight, Globe } from 'lucide-react';
+import { Play, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { usePlayerStore, type Track } from '../store/usePlayerStore';
 
 // --- Components ---
 
-const CategoryPills = () => {
+const CategoryPills = ({ selected, onSelect }: { selected: string | null, onSelect: (cat: string) => void }) => {
     const categories = ["Energize", "Workout", "Relax", "Focus", "Commute", "Party", "Romance", "Sleep", "Podcasts"];
     return (
         <div className="flex space-x-3 overflow-x-auto pb-4 scrollbar-none">
+            <button
+                onClick={() => onSelect('')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors border ${!selected ? 'bg-white text-black border-white' : 'bg-white/10 hover:bg-white/20 text-white border-white/5'}`}
+            >
+                All
+            </button>
             {categories.map(cat => (
-                <button key={cat} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm font-medium whitespace-nowrap transition-colors border border-white/5">
+                <button
+                    key={cat}
+                    onClick={() => onSelect(cat === selected ? '' : cat)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors border ${selected === cat ? 'bg-white text-black border-white' : 'bg-white/10 hover:bg-white/20 text-white border-white/5'}`}
+                >
                     {cat}
                 </button>
             ))}
@@ -20,9 +30,6 @@ const CategoryPills = () => {
 
 const QuickPicksGrid = ({ items, onPlay }: { items: any[], onPlay: (item: any) => void }) => {
     // Display up to 16 items in a 4-row grid (4 columns on large screens)
-    // Actually YTM "Quick Picks" is often a horizontal scroll of pages, but let's do a grid for now as requested
-    // The screenshot shows 4 rows, maybe 3 columns visible.
-    // Let's make it a responsive grid.
     if (!items || items.length === 0) return null;
 
     return (
@@ -97,9 +104,9 @@ const Shelf = ({ title, items, onPlay, onAddToQueue }: ShelfProps) => {
                 className="flex space-x-6 overflow-x-auto pb-4 scrollbar-none snap-x snap-mandatory"
                 style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
             >
-                {items.map((item) => (
+                {items.map((item, index) => (
                     <div
-                        key={item.pipedId || item.url}
+                        key={`${item.pipedId || item.url || 'item'}-${index}`}
                         className="flex-none w-48 group relative snap-start cursor-pointer"
                         onClick={() => onPlay(item)}
                     >
@@ -144,6 +151,8 @@ export const Home = () => {
     const { token, user } = useAuthStore();
     const { playTrack, addToQueue } = usePlayerStore();
     const [region, setRegion] = useState('US');
+    const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+
     const regions = [
         { code: 'US', name: 'United States' },
         { code: 'GB', name: 'United Kingdom' },
@@ -158,12 +167,17 @@ export const Home = () => {
 
     useEffect(() => {
         fetchHomeData();
-    }, [region]); // Refetch when region changes
+    }, [region, selectedCategory]); // Refetch when region or category changes
 
     const fetchHomeData = async () => {
         setLoading(true);
         try {
-            const res = await fetch(`/api/music/home?region=${region}`, {
+            let url = `/api/music/home?region=${region}`;
+            if (selectedCategory) {
+                url += `&category=${encodeURIComponent(selectedCategory)}`;
+            }
+
+            const res = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             const data = await res.json();
@@ -178,9 +192,17 @@ export const Home = () => {
     };
 
     const handlePlay = (item: any) => {
-        if (item.type === 'playlist') {
-            // Navigate to playlist
-            window.location.href = item.url; // Or use useNavigate if available, but href works for now
+        if (item.type === 'playlist' || item.type === 'album') {
+            // Navigate to playlist/album
+            // Use window.location for now, but ideally useNavigate
+            // Note: item.url is already set by backend to /library/playlist/:id
+            // We can extract the ID or just use the URL
+            // But window.location causes full reload. Better to use useNavigate if we can import it.
+            // Since I can't easily add imports without seeing the top, I'll assume useNavigate is not imported yet.
+            // But wait, I can see the top of the file in previous context. It imports from 'react'.
+            // I should add `import { useNavigate } from 'react-router-dom';` at the top.
+            // For now, I'll stick to the existing logic but fix the type check.
+            window.location.href = item.url;
             return;
         }
 
@@ -225,6 +247,11 @@ export const Home = () => {
         );
     }
 
+    // If category selected, show results as a grid or shelf
+    // The backend returns a single shelf for category search
+    // But we might want to display it differently?
+    // For now, standard shelf display is fine.
+
     // Find "Quick Picks" shelf
     const quickPicks = shelves.find(s => s.title === "Quick Picks");
     // Filter out Quick Picks from other shelves
@@ -234,7 +261,7 @@ export const Home = () => {
         <div className="space-y-10 p-8 pb-32 max-w-[1800px] mx-auto">
             {/* Header with Category Pills and Region Selector */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <CategoryPills />
+                <CategoryPills selected={selectedCategory} onSelect={setSelectedCategory} />
 
                 <div className="flex items-center space-x-2 min-w-fit">
                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Region</span>
@@ -250,24 +277,25 @@ export const Home = () => {
                 </div>
             </div>
 
-            {/* Quick Picks Grid (using the first shelf's items) */}
-            {quickPicks && (
+            {/* Quick Picks Grid (Only show if NO category selected) */}
+            {!selectedCategory && quickPicks && (
                 <QuickPicksGrid items={quickPicks.items} onPlay={handlePlay} />
             )}
 
-            {/* Listen Again (User History - Placeholder or fetched) */}
-            <div className="flex items-center space-x-4">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-xs font-bold">
-                    {user?.username?.[0]?.toUpperCase()}
+            {/* Listen Again (Only show if NO category selected) */}
+            {!selectedCategory && (
+                <div className="flex items-center space-x-4">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-xs font-bold">
+                        {user?.username?.[0]?.toUpperCase()}
+                    </div>
+                    <div>
+                        <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Listen again</p>
+                        <h2 className="text-2xl font-bold text-white">{user?.username}</h2>
+                    </div>
                 </div>
-                <div>
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Listen again</p>
-                    <h2 className="text-2xl font-bold text-white">{user?.username}</h2>
-                </div>
-            </div>
-            {/* We can reuse Shelf for Listen Again if we had data, for now just showing other shelves */}
+            )}
 
-            {/* Other Shelves */}
+            {/* Other Shelves (or Category Results) */}
             {otherShelves.map((shelf, index) => (
                 <Shelf
                     key={index}
