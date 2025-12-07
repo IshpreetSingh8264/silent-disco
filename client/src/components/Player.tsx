@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { useLocation, Link } from 'react-router-dom';
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Maximize2, Heart, ListMusic, Shuffle, ChevronDown, Trash2, History } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Maximize2, Heart, ListMusic, Shuffle, ChevronDown, Trash2, History, Radio } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuthStore } from '../store/useAuthStore';
 import { usePlayerStore } from '../store/usePlayerStore';
+import { useRoomStore } from '../store/useRoomStore';
 import { Queue } from './Queue';
 import { AddToPlaylistModal } from './modals/AddToPlaylistModal';
 import { analytics } from '../services/analytics';
@@ -12,14 +13,126 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import toast from 'react-hot-toast';
 
 export const Player = () => {
+    // Local Player State
     const {
-        currentTrack, isPlaying, togglePlay, playTrack,
+        currentTrack: localTrack, isPlaying: localIsPlaying, togglePlay: localTogglePlay, playTrack: localPlayTrack,
         isShuffle, toggleShuffle,
-        playNext, playPrevious,
-        removeFromQueue, clearQueue, playTrackFromQueue
+        playNext: localPlayNext, playPrevious: localPlayPrevious,
+        removeFromQueue: localRemoveFromQueue, clearQueue: localClearQueue, playTrackFromQueue: localPlayTrackFromQueue
     } = usePlayerStore();
 
+    const { user } = useAuthStore();
+
+    // Room Player State
+    const {
+        roomCode,
+        currentTrack: roomTrack,
+        isPlaying: roomIsPlaying,
+        play: roomPlay,
+        pause: roomPause,
+        isHost,
+        seek: roomSeek,
+        removeFromQueue: roomRemoveFromQueue,
+        position: roomPosition,
+        lastSyncTime,
+        members
+    } = useRoomStore();
+
+    // Determine active mode
+    const isRoomMode = !!roomCode;
+    const currentTrack = isRoomMode ? roomTrack : localTrack;
+    const isPlaying = isRoomMode ? roomIsPlaying : localIsPlaying;
+
+    // Get current member permissions
+    const currentMember = isRoomMode ? members.find(m => m.userId === user?.id) : null;
+    const canControlPlayback = isRoomMode ? (isHost || currentMember?.canControlPlayback) : true;
+    const canManageQueue = isRoomMode ? (isHost || currentMember?.canManageQueue) : true;
+
+    // Sync Effect for Room Mode
+    useEffect(() => {
+        if (isRoomMode && !canControlPlayback && audioRef.current && roomPosition !== undefined) {
+            const drift = Math.abs(audioRef.current.currentTime - roomPosition);
+            // Only sync if drift is significant (> 2 seconds) to avoid glitching
+            if (drift > 2) {
+                audioRef.current.currentTime = roomPosition;
+            }
+        }
+    }, [isRoomMode, canControlPlayback, roomPosition, lastSyncTime]);
+
+    // Derived Actions
+    const togglePlay = () => {
+        if (isRoomMode) {
+            if (!canControlPlayback) {
+                toast.error('You do not have permission to control playback');
+                return;
+            }
+            if (isPlaying) roomPause();
+            else if (currentTrack) roomPlay(currentTrack);
+        } else {
+            localTogglePlay();
+        }
+    };
+
+    const playNext = () => {
+        if (isRoomMode) {
+            if (!canControlPlayback) return;
+            toast.error('Skip not fully implemented for Rooms yet');
+        } else {
+            localPlayNext();
+        }
+    };
+
+    const playPrevious = () => {
+        if (isRoomMode) {
+            if (!canControlPlayback) return;
+            toast.error('Previous not implemented for Rooms');
+        } else {
+            localPlayPrevious();
+        }
+    };
+
     const queue = usePlayerStore(useShallow(state => [...state.queueExplicit, ...state.queueSystem, ...state.queueAI]));
+    // For Room Mode, we should use roomQueue, but for now let's stick to local queue for expanded view or fix it later.
+    // Actually, let's define upNext and history properly.
+    const { queue: roomQueue } = useRoomStore();
+    const activeQueue = isRoomMode ? roomQueue : queue;
+
+    const upNext = activeQueue.filter(t => !t.isPlayed);
+    const history = activeQueue.filter(t => t.isPlayed);
+
+    const handleQueuePlay = (track: any) => {
+        if (isRoomMode) {
+            if (!canControlPlayback) {
+                toast.error('You do not have permission to play tracks');
+                return;
+            }
+            roomPlay(track);
+        } else {
+            localPlayTrackFromQueue(track.pipedId || track.id);
+        }
+    };
+
+    const handleQueueRemove = (e: React.MouseEvent, track: any) => {
+        e.stopPropagation();
+        if (isRoomMode) {
+            if (!canManageQueue) {
+                toast.error('You do not have permission to manage queue');
+                return;
+            }
+            if (track.queueId) roomRemoveFromQueue(track.queueId);
+        } else {
+            localRemoveFromQueue(track.queueId || track.id);
+        }
+    };
+
+    const handleQueueClear = () => {
+        if (isRoomMode) {
+            if (!canManageQueue) return;
+            toast.error('Clear queue not implemented for rooms');
+        } else {
+            localClearQueue();
+        }
+    };
 
     const [volume, setVolume] = useState(0.8);
     const [muted, setMuted] = useState(false);
@@ -30,33 +143,25 @@ export const Player = () => {
     const [activeTab, setActiveTab] = useState('up next');
     const [showAddToPlaylist, setShowAddToPlaylist] = useState(false);
 
-    const { token, socket } = useAuthStore();
+    const { token } = useAuthStore();
     const [isLiked, setIsLiked] = useState(false);
     const audioRef = useRef<HTMLAudioElement>(null);
     const lastTrackedTime = useRef(0);
-    const location = useLocation();
-
-    // Check if in a room
-    const roomCode = location.pathname.startsWith('/rooms/') ? location.pathname.split('/')[2] : null;
 
     useEffect(() => {
         if (currentTrack) {
             checkIfLiked();
             lastTrackedTime.current = 0; // Reset tracking on track change
-            // Trigger smart queue check whenever track changes
-            if (!roomCode) {
-                // checkSmartQueue(); // Handled in store actions to prevent race conditions
-            }
         }
-    }, [currentTrack, roomCode]);
+    }, [currentTrack]);
 
     useEffect(() => {
         if (audioRef.current) {
             if (isPlaying) {
                 const playPromise = audioRef.current.play();
                 if (playPromise !== undefined) {
-                    playPromise.catch(error => {
-                        console.error("Playback failed:", error);
+                    playPromise.catch(() => {
+                        // console.error("Playback failed:", error);
                     });
                 }
             } else {
@@ -108,53 +213,6 @@ export const Player = () => {
         }
     };
 
-    const handlePlayNext = () => {
-        if (roomCode && socket) {
-            // Room logic remains manual for now as it involves socket
-            if (queue.length > 0) {
-                let nextTrackIndex = 0;
-                if (isShuffle) {
-                    nextTrackIndex = Math.floor(Math.random() * queue.length);
-                }
-                const nextTrack = queue[nextTrackIndex];
-                if ((nextTrack as any).queueId) {
-                    socket.emit('queue_remove', { roomCode, queueId: (nextTrack as any).queueId });
-                }
-                socket.emit('play', { roomCode, track: nextTrack, position: 0 });
-            }
-        } else {
-            playNext();
-        }
-    };
-
-    const handleQueueRemove = (e: React.MouseEvent, track: any) => {
-        e.stopPropagation();
-        if (roomCode && socket) {
-            if (track.queueId) {
-                socket.emit('queue_remove', { roomCode, queueId: track.queueId });
-            }
-        } else {
-            removeFromQueue(track.queueId || track.id);
-            toast.success('Removed from queue');
-        }
-    };
-
-    const handleQueueClear = () => {
-        if (roomCode && socket) {
-            toast.error('Clear queue not implemented for rooms yet');
-        } else {
-            clearQueue();
-            toast.success('Queue cleared');
-        }
-    };
-
-    const handleQueuePlay = (track: any) => {
-        playTrackFromQueue(track.pipedId || track.id);
-        if (roomCode && socket) {
-            socket.emit('play', { roomCode, track, position: 0 });
-        }
-    };
-
     if (!currentTrack) return null;
 
     const handleTimeUpdate = () => {
@@ -164,10 +222,9 @@ export const Player = () => {
             setPlayed(currentTime / duration);
             setDuration(duration);
 
-            // Track DWELL every 30 seconds
             if (currentTime - lastTrackedTime.current > 30) {
                 analytics.track('DWELL', {
-                    trackId: currentTrack.id,
+                    trackId: currentTrack.id || currentTrack.pipedId,
                     value: currentTime,
                     metadata: { duration }
                 });
@@ -177,11 +234,18 @@ export const Player = () => {
     };
 
     const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (isRoomMode && !canControlPlayback) return; // Guests cannot seek
+
         const newPlayed = parseFloat(e.target.value);
         setPlayed(newPlayed);
         if (audioRef.current) {
             const duration = audioRef.current.duration || currentTrack.duration || 0;
-            audioRef.current.currentTime = newPlayed * duration;
+            const newTime = newPlayed * duration;
+            audioRef.current.currentTime = newTime;
+
+            if (isRoomMode && canControlPlayback) {
+                roomSeek(newTime);
+            }
         }
     };
 
@@ -192,8 +256,9 @@ export const Player = () => {
         return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
     };
 
-    const history = queue.filter(t => t.isPlayed);
-    const upNext = queue.filter(t => !t.isPlayed);
+    // Helper to safely access properties that might be missing on RoomQueueItem
+    const getThumbnailHd = (track: any) => track.thumbnailHdUrl || track.thumbnail;
+    const getArtistId = (track: any) => track.artistId;
 
     return (
         <>
@@ -203,9 +268,8 @@ export const Player = () => {
                     ref={audioRef}
                     src={currentTrack.url}
                     onTimeUpdate={handleTimeUpdate}
-                    onEnded={handlePlayNext}
+                    onEnded={playNext}
                     onLoadedMetadata={(e) => {
-                        console.log("Audio loaded:", e.currentTarget.src);
                         if (isPlaying) e.currentTarget.play().catch(console.error);
                     }}
                     onError={(e) => console.error("Audio error:", e.currentTarget.error, e.currentTarget.src)}
@@ -231,7 +295,7 @@ export const Player = () => {
                             <div className="absolute inset-0 z-0">
                                 <div className="absolute inset-0 bg-black/60 z-10" />
                                 <img
-                                    src={currentTrack.thumbnailHdUrl || currentTrack.thumbnail}
+                                    src={getThumbnailHd(currentTrack)}
                                     alt=""
                                     className="w-full h-full object-cover blur-3xl opacity-50 scale-110"
                                 />
@@ -254,15 +318,15 @@ export const Player = () => {
                                     transition={{ duration: 0.3 }}
                                 >
                                     <img
-                                        src={currentTrack.thumbnailHdUrl || currentTrack.thumbnail}
+                                        src={getThumbnailHd(currentTrack)}
                                         alt={currentTrack.title}
                                         className="w-full h-full object-cover"
                                     />
                                 </motion.div>
                                 <div className="w-full text-center md:text-left space-y-2">
                                     <h2 className="text-3xl md:text-5xl font-bold text-white truncate drop-shadow-lg">{currentTrack.title}</h2>
-                                    {currentTrack.artistId ? (
-                                        <Link to={`/artist/${currentTrack.artistId}`} className="text-xl md:text-2xl text-gray-200 drop-shadow-md hover:text-white hover:underline transition-all" onClick={() => setIsExpanded(false)}>
+                                    {getArtistId(currentTrack) ? (
+                                        <Link to={`/artist/${getArtistId(currentTrack)}`} className="text-xl md:text-2xl text-gray-200 drop-shadow-md hover:text-white hover:underline transition-all" onClick={() => setIsExpanded(false)}>
                                             {currentTrack.artist || currentTrack.uploaderName}
                                         </Link>
                                     ) : (
@@ -327,7 +391,7 @@ export const Player = () => {
                                                     <div className="space-y-1">
                                                         {upNext.map((track, i) => (
                                                             <div
-                                                                key={`${track.pipedId}-${i}`}
+                                                                key={`${track.pipedId || track.id}-${i}`}
                                                                 className="group flex items-center space-x-3 p-2 rounded-lg hover:bg-white/10 transition-all cursor-pointer border border-transparent hover:border-white/5"
                                                                 onClick={() => handleQueuePlay(track)}
                                                             >
@@ -339,8 +403,8 @@ export const Player = () => {
                                                                 </div>
                                                                 <div className="flex-1 min-w-0">
                                                                     <h4 className="font-medium truncate text-white text-sm group-hover:text-retro-primary transition-colors">{track.title}</h4>
-                                                                    {track.artistId ? (
-                                                                        <Link to={`/artist/${track.artistId}`} className="text-xs text-gray-400 truncate hover:text-white hover:underline block" onClick={(e) => { e.stopPropagation(); setIsExpanded(false); }}>
+                                                                    {getArtistId(track) ? (
+                                                                        <Link to={`/artist/${getArtistId(track)}`} className="text-xs text-gray-400 truncate hover:text-white hover:underline block" onClick={(e) => { e.stopPropagation(); setIsExpanded(false); }}>
                                                                             {track.artist || track.uploaderName}
                                                                         </Link>
                                                                     ) : (
@@ -372,7 +436,7 @@ export const Player = () => {
                                                             <div
                                                                 key={`history-${i}`}
                                                                 className="group flex items-center space-x-3 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
-                                                                onClick={() => playTrack(track)}
+                                                                onClick={() => localPlayTrack(track)}
                                                             >
                                                                 <div className="relative w-10 h-10 flex-shrink-0 grayscale group-hover:grayscale-0 transition-all">
                                                                     <img src={track.thumbnail} alt="" className="w-full h-full rounded-md object-cover" />
@@ -418,8 +482,8 @@ export const Player = () => {
                         )}
                         <div className="hidden md:block">
                             <h4 className="font-medium text-white truncate max-w-[200px]">{currentTrack.title}</h4>
-                            {currentTrack.artistId ? (
-                                <Link to={`/artist/${currentTrack.artistId}`} className="text-xs text-gray-400 hover:text-white hover:underline transition-colors">
+                            {getArtistId(currentTrack) ? (
+                                <Link to={`/artist/${getArtistId(currentTrack)}`} className="text-xs text-gray-400 hover:text-white hover:underline transition-colors">
                                     {currentTrack.uploaderName}
                                 </Link>
                             ) : (
@@ -429,6 +493,12 @@ export const Player = () => {
                         <button onClick={toggleLike} className="hidden md:block text-gray-400 hover:text-retro-primary transition-colors">
                             <Heart size={20} fill={isLiked ? "currentColor" : "none"} className={isLiked ? "text-retro-primary" : ""} />
                         </button>
+                        {isRoomMode && (
+                            <div className="flex items-center space-x-2 px-3 py-1 bg-retro-primary/20 rounded-full border border-retro-primary/50">
+                                <Radio size={14} className="text-retro-primary animate-pulse" />
+                                <span className="text-xs font-bold text-retro-primary uppercase tracking-wider">Live Room</span>
+                            </div>
+                        )}
                     </div>
 
                     {/* Playback Controls */}
@@ -436,25 +506,29 @@ export const Player = () => {
                         <div className="flex items-center space-x-6">
                             <button
                                 onClick={toggleShuffle}
-                                className={`text-gray-400 hover:text-white transition-colors ${isShuffle ? 'text-retro-primary' : ''}`}
+                                disabled={isRoomMode}
+                                className={`text-gray-400 hover:text-white transition-colors ${isShuffle ? 'text-retro-primary' : ''} ${isRoomMode ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 <Shuffle size={18} />
                             </button>
                             <button
                                 onClick={playPrevious}
-                                className="text-gray-400 hover:text-white transition-colors"
+                                disabled={isRoomMode}
+                                className={`text-gray-400 hover:text-white transition-colors ${isRoomMode ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 <SkipBack size={20} />
                             </button>
                             <button
                                 onClick={togglePlay}
-                                className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 transition-transform"
+                                disabled={isRoomMode && !isHost}
+                                className={`w-10 h-10 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 transition-transform ${isRoomMode && !isHost ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 {isPlaying ? <Pause size={20} fill="black" /> : <Play size={20} fill="black" className="ml-1" />}
                             </button>
                             <button
-                                onClick={handlePlayNext}
-                                className="text-gray-400 hover:text-white transition-colors"
+                                onClick={playNext}
+                                disabled={isRoomMode && !isHost}
+                                className={`text-gray-400 hover:text-white transition-colors ${isRoomMode && !isHost ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 <SkipForward size={20} />
                             </button>

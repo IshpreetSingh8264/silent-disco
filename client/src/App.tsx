@@ -25,13 +25,6 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
 
-        {/* Top-level route for Room with dynamic ID, protected */}
-        <Route path="/room/:id" element={
-          <ProtectedRoute>
-            <Room />
-          </ProtectedRoute>
-        } />
-
         <Route path="/" element={
           <ProtectedRoute>
             <Layout />
@@ -39,7 +32,7 @@ function App() {
         }>
           <Route index element={<Home />} />
           <Route path="search" element={<Search />} />
-          <Route path="rooms" element={<Room />} /> {/* Original rooms route */}
+          <Route path="rooms" element={<Room />} />
           <Route path="library" element={<Library />} />
           <Route path="library/playlist/:id" element={<PlaylistDetail />} />
           <Route path="artist/:id" element={<ArtistProfile />} />

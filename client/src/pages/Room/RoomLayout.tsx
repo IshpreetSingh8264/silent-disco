@@ -1,82 +1,132 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useRoomStore } from '../../store/useRoomStore';
 import { useAuthStore } from '../../store/useAuthStore';
-import QueueList from '../../components/Room/QueueList';
-import PlayerSync from '../../components/Room/PlayerSync';
-import { Users, Share2, Settings } from 'lucide-react';
+import { Copy, MessageSquare, Music } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { RoomSearch } from '../../components/Room/RoomSearch';
+import { RoomQueue } from '../../components/Room/RoomQueue';
 
-const RoomLayout: React.FC = () => {
-    const { code } = useParams<{ code: string }>();
+export const RoomLayout = () => {
+    const { code } = useParams();
     const { user } = useAuthStore();
-    const { connect, disconnect, members, roomCode, isHost } = useRoomStore();
+    const { connect, currentTrack, isPlaying } = useRoomStore();
 
     useEffect(() => {
         if (code && user) {
             connect(code, user.id);
         }
-        return () => {
-            disconnect();
-        };
-    }, [code, user, connect, disconnect]);
+    }, [code, user, connect]);
 
-    if (!roomCode) {
-        return <div className="flex items-center justify-center h-screen text-white">Joining Room...</div>;
-    }
+    const copyLink = () => {
+        navigator.clipboard.writeText(window.location.href);
+        toast.success('Room link copied!');
+    };
 
     return (
-        <div className="flex flex-col h-screen bg-black text-white">
-            {/* Header */}
-            <header className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-black/50 backdrop-blur-md">
-                <div className="flex items-center gap-4">
-                    <h1 className="text-xl font-bold">Room: {code}</h1>
-                    <span className="px-2 py-0.5 text-xs bg-purple-500/20 text-purple-400 rounded-full border border-purple-500/30">
-                        {isHost ? 'HOST' : 'GUEST'}
-                    </span>
+        <div className="h-full flex flex-col p-6 space-y-6">
+            {/* Top Bar: Search & Invite */}
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex-1 max-w-2xl">
+                    <RoomSearch />
                 </div>
-                <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2 text-sm text-gray-400">
-                        <Users size={16} />
-                        <span>{members.length}</span>
-                    </div>
-                    <button className="p-2 hover:bg-white/10 rounded-full transition-colors">
-                        <Share2 size={20} />
-                    </button>
-                    {isHost && (
-                        <button className="p-2 hover:bg-white/10 rounded-full transition-colors">
-                            <Settings size={20} />
-                        </button>
-                    )}
-                </div>
-            </header>
 
-            {/* Main Content */}
-            <main className="flex-1 flex overflow-hidden">
-                {/* Left: Player & Visuals */}
-                <div className="flex-1 flex flex-col relative">
-                    <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-purple-900/20 to-black">
-                        {/* Visualizer Placeholder */}
-                        <div className="w-64 h-64 rounded-full bg-purple-500/10 animate-pulse flex items-center justify-center">
-                            <div className="w-48 h-48 rounded-full bg-purple-500/20 animate-ping" />
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={copyLink}
+                        className="p-3 bg-white/5 hover:bg-white/10 rounded-xl transition-colors text-gray-400 hover:text-white"
+                        title="Invite Friends"
+                    >
+                        <Copy size={20} />
+                    </button>
+                </div>
+            </div>
+
+            {/* Main Content Grid */}
+            <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0">
+                {/* Left Column: Queue */}
+                <div className="lg:col-span-4 h-full min-h-0 bg-black/20 rounded-3xl border border-white/5 overflow-hidden backdrop-blur-sm">
+                    <RoomQueue />
+                </div>
+
+                {/* Right Column: Visualizer & Chat */}
+                <div className="lg:col-span-8 h-full min-h-0 flex flex-col gap-6">
+                    {/* Now Playing Visualizer Area */}
+                    <div className="flex-1 bg-black/40 rounded-3xl border border-white/5 overflow-hidden relative group">
+                        {currentTrack ? (
+                            <>
+                                {/* Background Blur */}
+                                <div className="absolute inset-0 z-0">
+                                    <img
+                                        src={currentTrack.thumbnail}
+                                        alt=""
+                                        className="w-full h-full object-cover blur-3xl opacity-30 scale-110 transition-transform duration-[10s] ease-linear"
+                                        style={{ transform: isPlaying ? 'scale(1.2)' : 'scale(1.1)' }}
+                                    />
+                                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-black/40" />
+                                </div>
+
+                                {/* Content */}
+                                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center p-8 text-center">
+                                    <div className={`relative w-64 h-64 mb-8 rounded-2xl overflow-hidden shadow-2xl transition-transform duration-700 ${isPlaying ? 'scale-105' : 'scale-100'}`}>
+                                        <img
+                                            src={currentTrack.thumbnail}
+                                            alt={currentTrack.title}
+                                            className="w-full h-full object-cover"
+                                        />
+                                        {/* Equalizer Overlay */}
+                                        {isPlaying && (
+                                            <div className="absolute inset-0 bg-black/20 flex items-end justify-center gap-1 pb-4">
+                                                {[...Array(8)].map((_, i) => (
+                                                    <div
+                                                        key={i}
+                                                        className="w-2 bg-retro-primary rounded-t-full animate-bounce"
+                                                        style={{
+                                                            height: '40%',
+                                                            animationDelay: `${i * 0.1}s`,
+                                                            animationDuration: '0.8s'
+                                                        }}
+                                                    />
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <h2 className="text-4xl font-bold text-white mb-2 drop-shadow-lg max-w-2xl truncate">{currentTrack.title}</h2>
+                                    <p className="text-xl text-gray-200 drop-shadow-md">{currentTrack.artist}</p>
+                                    <p className="text-sm text-gray-400 mt-2">Added by {currentTrack.uploaderName}</p>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
+                                <div className="w-24 h-24 bg-white/5 rounded-full flex items-center justify-center mb-4">
+                                    <Music size={48} className="opacity-50" />
+                                </div>
+                                <p className="text-lg font-medium">No track playing</p>
+                                <p className="text-sm">Add songs to the queue to start the party</p>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Chat Placeholder */}
+                    <div className="h-48 bg-black/20 rounded-3xl border border-white/5 p-4 flex flex-col">
+                        <div className="flex items-center gap-2 mb-4 text-gray-400">
+                            <MessageSquare size={18} />
+                            <span className="text-sm font-bold uppercase tracking-wider">Room Chat</span>
+                        </div>
+                        <div className="flex-1 flex items-center justify-center text-gray-600 text-sm">
+                            Chat coming soon...
+                        </div>
+                        <div className="mt-2">
+                            <input
+                                type="text"
+                                disabled
+                                placeholder="Type a message..."
+                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-gray-500 cursor-not-allowed"
+                            />
                         </div>
                     </div>
-
-                    {/* Player Controls */}
-                    <div className="p-6 border-t border-white/10 bg-black/80 backdrop-blur-xl">
-                        <PlayerSync />
-                    </div>
                 </div>
-
-                {/* Right: Queue & Chat */}
-                <div className="w-96 border-l border-white/10 flex flex-col bg-black/40 backdrop-blur-md">
-                    <div className="p-4 border-b border-white/10 font-medium">Queue</div>
-                    <div className="flex-1 overflow-y-auto">
-                        <QueueList />
-                    </div>
-                </div>
-            </main>
+            </div>
         </div>
     );
 };
-
-export default RoomLayout;

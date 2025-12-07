@@ -83,6 +83,13 @@ model RoomMember {
   room     Room     @relation(fields: [roomId], references: [id])
   joinedAt DateTime @default(now())
 
+  // Permissions
+  canAddQueue       Boolean @default(true)
+  canManageQueue    Boolean @default(false) // Remove/Reorder
+  canControlPlayback Boolean @default(false) // Play/Pause/Skip
+
+  socketId String? // To handle race conditions
+
   @@index([roomId])
   @@index([userId])
 }

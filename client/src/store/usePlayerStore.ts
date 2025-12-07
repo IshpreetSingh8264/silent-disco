@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { analytics } from '../services/analytics';
+import { useRoomStore } from './useRoomStore';
 
 export interface Track {
     id?: string;
@@ -100,6 +101,24 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     // ... (playTrack etc remain same, they call sendSignal/addToHistory)
 
     playTrack: (track, context = 'search') => {
+        // Check for active Room
+        const { roomCode, play: roomPlay } = useRoomStore.getState();
+        if (roomCode) {
+            // Transform track to RoomQueueItem if needed, or just pass it
+            // The room store expects RoomQueueItem, but for now we can pass the track
+            // and let the server/socket handler deal with it or cast it.
+            // We need to ensure it has the right shape.
+            const roomTrack = {
+                ...track,
+                queueId: '', // Will be generated
+                isPlayed: false,
+                pipedId: track.pipedId || track.id || '',
+                url: track.url || ''
+            };
+            roomPlay(roomTrack as any);
+            return;
+        }
+
         const { currentTrack, history, addToHistory, startTime, sendSignal } = get();
 
         // Record signals for previous track
@@ -166,6 +185,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     setPlaying: (isPlaying: boolean) => set({ isPlaying }),
 
     addToQueue: async (track) => {
+        // Check for active Room
+        const { roomCode, addToQueue: roomAdd } = useRoomStore.getState();
+        if (roomCode) {
+            roomAdd(track);
+            return;
+        }
+
         // Ensure URL
         const trackWithUrl = {
             ...track,
