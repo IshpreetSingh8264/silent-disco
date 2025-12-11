@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useRoomStore } from '../../store/useRoomStore';
-import { useAuthStore } from '../../store/useAuthStore';
 import { Copy, MessageSquare, Music } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { RoomSearch } from '../../components/Room/RoomSearch';
@@ -9,14 +8,13 @@ import { RoomQueue } from '../../components/Room/RoomQueue';
 
 export const RoomLayout = () => {
     const { code } = useParams();
-    const { user } = useAuthStore();
     const { connect, currentTrack, isPlaying } = useRoomStore();
 
     useEffect(() => {
-        if (code && user) {
-            connect(code, user.id);
+        if (code) {
+            connect(code);
         }
-    }, [code, user, connect]);
+    }, [code, connect]);
 
     const copyLink = () => {
         navigator.clipboard.writeText(window.location.href);

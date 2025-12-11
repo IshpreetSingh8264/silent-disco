@@ -3,7 +3,7 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Home, Library, PlayCircle, Users, Settings, Crown, LogOut, Shield, Copy } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { usePlayerStore } from '../store/usePlayerStore';
-import { useRoomStore, type RoomMember } from '../store/useRoomStore';
+import { useRoomStore } from '../store/useRoomStore';
 import { Player } from './Player';
 import { Navbar } from './Navbar';
 import { MemberPermissionsModal } from './modals/MemberPermissionsModal';

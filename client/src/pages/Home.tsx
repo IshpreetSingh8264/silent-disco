@@ -148,7 +148,7 @@ const Shelf = ({ title, items, onPlay, onAddToQueue }: ShelfProps) => {
 export const Home = () => {
     const [shelves, setShelves] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
-    const { token, user } = useAuthStore();
+    const { token } = useAuthStore();
     const { playTrack, addToQueue } = usePlayerStore();
     const [region, setRegion] = useState('US');
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
