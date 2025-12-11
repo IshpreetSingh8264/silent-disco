@@ -1,38 +1,112 @@
 version: '3.8'
 
 services:
+  # ===================
+  # PostgreSQL Database
+  # ===================
   db:
     image: postgres:16-alpine
-    container_name: silent-disco-db
+    container_name: silentdisco-db
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: silent_disco
-    ports:
-      - "5433:5432"
+      POSTGRES_USER: ${DB_USER:-silentdisco}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-silentdisco123}
+      POSTGRES_DB: ${DB_NAME:-silentdisco}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    restart: always
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-silentdisco}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 50M
+        reservations:
+          memory: 30M
+    networks:
+      - silentdisco-net
 
+  # ===================
+  # Redis (In-memory cache)
+  # ===================
   redis:
-    image: redis:alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    restart: always
+    image: redis:7-alpine
+    container_name: silentdisco-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 20mb --maxmemory-policy allkeys-lru --save ""
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 25M
+        reservations:
+          memory: 15M
+    networks:
+      - silentdisco-net
 
-  meilisearch:
-    image: getmeili/meilisearch:v1.10
-    ports:
-      - "7700:7700"
+  # ===================
+  # Backend (Node.js API)
+  # ===================
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: silentdisco-backend
+    restart: unless-stopped
     environment:
-      - MEILI_MASTER_KEY=masterKey123
-    volumes:
-      - meili_data:/meili_data
-    restart: always
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${DB_USER:-silentdisco}:${DB_PASSWORD:-silentdisco123}@db:5432/${DB_NAME:-silentdisco}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+    ports:
+      - "${BACKEND_PORT:-3847}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 80M
+        reservations:
+          memory: 50M
+    networks:
+      - silentdisco-net
+
+  # ===================
+  # Frontend (Nginx + React)
+  # ===================
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: silentdisco-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3846}:80"
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 20M
+        reservations:
+          memory: 10M
+    networks:
+      - silentdisco-net
 
 volumes:
   postgres_data:
-  redis_data:
-  meili_data:
+    driver: local
+
+networks:
+  silentdisco-net:
+    driver: bridge

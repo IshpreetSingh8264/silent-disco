@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePlayerStore } from '../store/usePlayerStore';
+import { useRoomStore } from '../store/useRoomStore';
+import { useAuthStore } from '../store/useAuthStore';
 
 interface UseKeyboardShortcutsProps {
     audioRef: React.RefObject<HTMLAudioElement | null>;
@@ -25,8 +27,74 @@ export const useKeyboardShortcuts = ({
     isExpanded,
     setIsExpanded
 }: UseKeyboardShortcutsProps) => {
-    const { togglePlay, playNext, playPrevious } = usePlayerStore();
+    const { togglePlay: localTogglePlay, playNext: localPlayNext, playPrevious: localPlayPrevious } = usePlayerStore();
+    const {
+        roomCode,
+        isPlaying: roomIsPlaying,
+        currentTrack: roomCurrentTrack,
+        play: roomPlay,
+        pause: roomPause,
+        seek: roomSeek,
+        playNext: roomPlayNext,
+        playPrevious: roomPlayPrevious,
+        isHost,
+        members,
+        position: roomPosition
+    } = useRoomStore();
+    const { user } = useAuthStore();
     const navigate = useNavigate();
+
+    const isRoomMode = !!roomCode;
+
+    // Get current member permissions
+    const currentMember = isRoomMode ? members.find(m => m.userId === user?.id) : null;
+    const canControlPlayback = isRoomMode ? (isHost || currentMember?.canControlPlayback) : true;
+
+    // Room-aware toggle play
+    const togglePlay = () => {
+        if (isRoomMode) {
+            if (!canControlPlayback) return;
+            if (roomIsPlaying) {
+                roomPause();
+            } else if (roomCurrentTrack) {
+                roomPlay(roomCurrentTrack);
+            }
+        } else {
+            localTogglePlay();
+        }
+    };
+
+    // Room-aware next
+    const playNext = () => {
+        if (isRoomMode) {
+            if (!canControlPlayback) return;
+            roomPlayNext();
+        } else {
+            localPlayNext();
+        }
+    };
+
+    // Room-aware previous
+    const playPrevious = () => {
+        if (isRoomMode) {
+            if (!canControlPlayback) return;
+            roomPlayPrevious();
+        } else {
+            localPlayPrevious();
+        }
+    };
+
+    // Room-aware seek
+    const seek = (delta: number) => {
+        if (audioRef.current) {
+            const newTime = Math.max(0, audioRef.current.currentTime + delta);
+            audioRef.current.currentTime = newTime;
+
+            if (isRoomMode && canControlPlayback) {
+                roomSeek(newTime);
+            }
+        }
+    };
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -46,16 +114,16 @@ export const useKeyboardShortcuts = ({
                     if (e.shiftKey) playPrevious();
                     break;
                 case 'j':
-                    if (audioRef.current) audioRef.current.currentTime -= 10;
+                    seek(-10);
                     break;
                 case 'l':
-                    if (audioRef.current) audioRef.current.currentTime += 10;
+                    seek(10);
                     break;
                 case 'arrowleft':
-                    if (audioRef.current) audioRef.current.currentTime -= 5;
+                    seek(-5);
                     break;
                 case 'arrowright':
-                    if (audioRef.current) audioRef.current.currentTime += 5;
+                    seek(5);
                     break;
                 case 'arrowup':
                     e.preventDefault();
@@ -80,8 +148,6 @@ export const useKeyboardShortcuts = ({
                     break;
                 case 's':
                     e.preventDefault();
-                    // Focus search input - assuming it has a specific ID or we navigate
-                    // For now, let's navigate to search if not there, or focus if present
                     const searchInput = document.querySelector('input[type="text"]') as HTMLInputElement;
                     if (searchInput) {
                         searchInput.focus();
@@ -94,5 +160,6 @@ export const useKeyboardShortcuts = ({
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [audioRef, volume, setVolume, muted, setMuted, isQueueOpen, setIsQueueOpen, isExpanded, setIsExpanded, togglePlay, navigate]);
+    }, [audioRef, volume, setVolume, muted, setMuted, isQueueOpen, setIsQueueOpen, isExpanded, setIsExpanded,
+        isRoomMode, roomIsPlaying, roomCurrentTrack, canControlPlayback, navigate, roomPosition]);
 };

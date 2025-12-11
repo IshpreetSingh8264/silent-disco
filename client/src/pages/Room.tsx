@@ -23,11 +23,9 @@ export const Room = () => {
             });
             const data = await res.json();
             if (data.code) {
-                if (user?.id) {
-                    connect(data.code, user.id);
-                    navigate('/');
-                    toast.success('Room created!');
-                }
+                connect(data.code);
+                navigate('/');
+                toast.success('Room created!');
             } else {
                 toast.error('Failed to create room');
             }
@@ -38,8 +36,8 @@ export const Room = () => {
     };
 
     const joinRoom = (code: string) => {
-        if (code && user?.id) {
-            connect(code, user.id);
+        if (code) {
+            connect(code);
             navigate('/');
             toast.success('Joined room!');
         }

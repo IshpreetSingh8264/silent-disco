@@ -283,7 +283,7 @@ export const Home = () => {
             )}
 
             {/* Listen Again (Only show if NO category selected) */}
-            {!selectedCategory && (
+            {/* {!selectedCategory && (
                 <div className="flex items-center space-x-4">
                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-xs font-bold">
                         {user?.username?.[0]?.toUpperCase()}
@@ -293,7 +293,7 @@ export const Home = () => {
                         <h2 className="text-2xl font-bold text-white">{user?.username}</h2>
                     </div>
                 </div>
-            )}
+            )} */}
 
             {/* Other Shelves (or Category Results) */}
             {otherShelves.map((shelf, index) => (

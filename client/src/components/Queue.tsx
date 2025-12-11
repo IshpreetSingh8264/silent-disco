@@ -2,6 +2,7 @@ import { usePlayerStore } from '../store/usePlayerStore';
 import { X, Trash2, Play, Clock, Music2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useRoomStore } from '../store/useRoomStore';
+import { useAuthStore } from '../store/useAuthStore';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface QueueProps {
@@ -29,11 +30,19 @@ export const Queue = ({ isOpen, onClose }: QueueProps) => {
         queue: roomQueue,
         play: roomPlay,
         removeFromQueue: roomRemoveFromQueue,
-        isHost
+        isHost,
+        members
     } = useRoomStore();
+
+    const { user } = useAuthStore();
 
     const isRoomMode = !!roomCode;
     const currentTrack = isRoomMode ? roomTrack : localTrack;
+
+    // Get current member permissions
+    const currentMember = isRoomMode ? members.find(m => m.userId === user?.id) : null;
+    const canControlPlayback = isRoomMode ? (isHost || currentMember?.canControlPlayback) : true;
+    const canManageQueue = isRoomMode ? (isHost || currentMember?.canManageQueue) : true;
 
     // Combine queues for display
     const queue = isRoomMode
@@ -52,8 +61,8 @@ export const Queue = ({ isOpen, onClose }: QueueProps) => {
 
     const handlePlay = (track: any, isQueueItem = false) => {
         if (isRoomMode) {
-            if (!isHost) {
-                toast.error('Only host can change tracks');
+            if (!canControlPlayback) {
+                toast.error('You do not have permission to control playback');
                 return;
             }
             roomPlay(track);
@@ -69,7 +78,10 @@ export const Queue = ({ isOpen, onClose }: QueueProps) => {
     const handleRemove = (e: React.MouseEvent, track: any) => {
         e.stopPropagation();
         if (isRoomMode) {
-            if (!isHost) return;
+            if (!canManageQueue) {
+                toast.error('You do not have permission to manage queue');
+                return;
+            }
             if (track.queueId) {
                 roomRemoveFromQueue(track.queueId);
             }
@@ -200,7 +212,7 @@ export const Queue = ({ isOpen, onClose }: QueueProps) => {
                                                 </div>
                                                 <div className="flex items-center space-x-3 opacity-0 group-hover:opacity-100 transition-opacity">
                                                     <span className="text-xs text-gray-500">{formatDuration(track.duration)}</span>
-                                                    {(!isRoomMode || isHost) && (
+                                                    {(!isRoomMode || canManageQueue) && (
                                                         <button
                                                             onClick={(e) => handleRemove(e, track)}
                                                             className="text-gray-400 hover:text-red-500 transition-colors"

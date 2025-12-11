@@ -35,7 +35,10 @@ export const Player = () => {
         removeFromQueue: roomRemoveFromQueue,
         position: roomPosition,
         lastSyncTime,
-        members
+        members,
+        playNext: roomPlayNext,
+        playPrevious: roomPlayPrevious,
+        setPosition
     } = useRoomStore();
 
     // Determine active mode
@@ -48,16 +51,17 @@ export const Player = () => {
     const canControlPlayback = isRoomMode ? (isHost || currentMember?.canControlPlayback) : true;
     const canManageQueue = isRoomMode ? (isHost || currentMember?.canManageQueue) : true;
 
-    // Sync Effect for Room Mode
+    // Sync Effect for Room Mode - only seek when receiving sync events with significant drift
     useEffect(() => {
-        if (isRoomMode && !canControlPlayback && audioRef.current && roomPosition !== undefined) {
+        if (isRoomMode && audioRef.current && roomPosition !== undefined) {
             const drift = Math.abs(audioRef.current.currentTime - roomPosition);
-            // Only sync if drift is significant (> 2 seconds) to avoid glitching
+            // Only correct if drift is more than 2 seconds to avoid constant jumping
             if (drift > 2) {
+                console.log(`[Player] Correcting drift of ${drift.toFixed(1)}s`);
                 audioRef.current.currentTime = roomPosition;
             }
         }
-    }, [isRoomMode, canControlPlayback, roomPosition, lastSyncTime]);
+    }, [isRoomMode, roomPosition, lastSyncTime]);
 
     // Derived Actions
     const togglePlay = () => {
@@ -75,8 +79,11 @@ export const Player = () => {
 
     const playNext = () => {
         if (isRoomMode) {
-            if (!canControlPlayback) return;
-            toast.error('Skip not fully implemented for Rooms yet');
+            if (!canControlPlayback) {
+                toast.error('You do not have permission to control playback');
+                return;
+            }
+            roomPlayNext();
         } else {
             localPlayNext();
         }
@@ -84,8 +91,11 @@ export const Player = () => {
 
     const playPrevious = () => {
         if (isRoomMode) {
-            if (!canControlPlayback) return;
-            toast.error('Previous not implemented for Rooms');
+            if (!canControlPlayback) {
+                toast.error('You do not have permission to control playback');
+                return;
+            }
+            roomPlayPrevious();
         } else {
             localPlayPrevious();
         }
@@ -221,6 +231,11 @@ export const Player = () => {
             const duration = audioRef.current.duration || currentTrack.duration || 0;
             setPlayed(currentTime / duration);
             setDuration(duration);
+
+            // Keep room store position in sync with audio playback
+            if (isRoomMode) {
+                setPosition(currentTime);
+            }
 
             if (currentTime - lastTrackedTime.current > 30) {
                 analytics.track('DWELL', {
@@ -520,15 +535,15 @@ export const Player = () => {
                             </button>
                             <button
                                 onClick={togglePlay}
-                                disabled={isRoomMode && !isHost}
-                                className={`w-10 h-10 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 transition-transform ${isRoomMode && !isHost ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                disabled={isRoomMode && !canControlPlayback}
+                                className={`w-10 h-10 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 transition-transform ${isRoomMode && !canControlPlayback ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 {isPlaying ? <Pause size={20} fill="black" /> : <Play size={20} fill="black" className="ml-1" />}
                             </button>
                             <button
                                 onClick={playNext}
-                                disabled={isRoomMode && !isHost}
-                                className={`text-gray-400 hover:text-white transition-colors ${isRoomMode && !isHost ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                disabled={isRoomMode && !canControlPlayback}
+                                className={`text-gray-400 hover:text-white transition-colors ${isRoomMode && !canControlPlayback ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 <SkipForward size={20} />
                             </button>
