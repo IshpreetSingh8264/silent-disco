@@ -12,14 +12,26 @@ class RedisService {
         if (this.isConnected) return;
 
         try {
-            this.client = new Redis({
-                host: process.env.REDIS_HOST || 'localhost',
-                port: parseInt(process.env.REDIS_PORT || '6379'),
-                retryStrategy: (times) => {
-                    const delay = Math.min(times * 50, 2000);
-                    return delay;
-                }
-            });
+            // Parse REDIS_URL or use individual env vars
+            const redisUrl = process.env.REDIS_URL;
+
+            if (redisUrl) {
+                this.client = new Redis(redisUrl, {
+                    retryStrategy: (times) => {
+                        const delay = Math.min(times * 50, 2000);
+                        return delay;
+                    }
+                });
+            } else {
+                this.client = new Redis({
+                    host: process.env.REDIS_HOST || 'localhost',
+                    port: parseInt(process.env.REDIS_PORT || '6379'),
+                    retryStrategy: (times) => {
+                        const delay = Math.min(times * 50, 2000);
+                        return delay;
+                    }
+                });
+            }
 
             this.client.on('connect', () => {
                 console.log('Redis connected');
