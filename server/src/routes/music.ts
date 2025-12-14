@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import YTMusic from 'ytmusic-api';
+import ytdl from '@distube/ytdl-core';
 import { spawn } from 'child_process';
 import path from 'path';
 import { redis } from '../services/redis';
@@ -122,42 +123,6 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
             return reply.status(500).send({ error: 'Failed to fetch trending' });
         }
     });
-    // Helper function to get stream URL via yt-dlp
-    const getStreamUrl = async (videoId: string): Promise<string> => {
-        const ytDlpPath = path.join(process.cwd(), 'bin', 'yt-dlp');
-
-        return new Promise((resolve, reject) => {
-            const ytDlp = spawn(ytDlpPath, [
-                '-g',
-                '-f', 'bestaudio[ext=m4a]/bestaudio',
-                '--no-playlist',
-                `https://www.youtube.com/watch?v=${videoId}`
-            ]);
-
-            let output = '';
-            let error = '';
-
-            ytDlp.stdout.on('data', (data: Buffer) => {
-                output += data.toString();
-            });
-
-            ytDlp.stderr.on('data', (data: Buffer) => {
-                error += data.toString();
-            });
-
-            ytDlp.on('close', (code: number) => {
-                if (code === 0 && output.trim()) {
-                    resolve(output.trim().split('\n')[0]);
-                } else {
-                    reject(new Error(`yt-dlp failed: ${error}`));
-                }
-            });
-
-            ytDlp.on('error', (err: Error) => {
-                reject(err);
-            });
-        });
-    };
 
     server.get('/streams/:videoId', async (request, reply) => {
         const { videoId } = request.params as { videoId: string };
@@ -168,9 +133,24 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
 
         try {
             server.log.info(`Fetching stream URL for ${videoId}`);
-            const streamUrl = await getStreamUrl(videoId);
+            const startTime = Date.now();
+
+            // Use ytdl-core (native Node.js) instead of yt-dlp (Python process)
+            const info = await ytdl.getInfo(`https://www.youtube.com/watch?v=${videoId}`);
+
+            // Get best audio format
+            const audioFormats = ytdl.filterFormats(info.formats, 'audioonly');
+            const bestAudio = audioFormats.sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0))[0];
+
+            if (!bestAudio?.url) {
+                throw new Error('No audio stream found');
+            }
+
+            const elapsed = Date.now() - startTime;
+            server.log.info(`Got stream URL for ${videoId} in ${elapsed}ms`);
+
             // Return JSON with URL - client loads directly from YouTube CDN
-            return { url: streamUrl };
+            return { url: bestAudio.url };
         } catch (err) {
             server.log.error(`Failed to get stream for ${videoId}: ${err}`);
             return reply.status(500).send({ error: 'Failed to fetch stream' });
