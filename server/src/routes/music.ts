@@ -123,34 +123,29 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         }
     });
 
-    // Self-hosted Piped API - INSTANT stream URLs (~200-500ms)
-    // Runs locally in Docker - always available, no external dependencies
-    const getStreamUrlFromPiped = async (videoId: string): Promise<string> => {
-        const res = await fetch(`http://piped:8080/streams/${videoId}`, {
-            headers: { 'Accept': 'application/json' }
-        });
-        if (!res.ok) throw new Error(`Piped: ${res.status}`);
-        const data = await res.json() as any;
-
-        // Get best audio stream
-        const audioStreams = data.audioStreams || [];
-        const bestAudio = audioStreams
-            .filter((s: any) => s.mimeType?.includes('audio'))
-            .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-
-        if (bestAudio?.url) return bestAudio.url;
-        if (data.hls) return data.hls;
-        throw new Error('Piped: No audio stream');
-    };
-
-    // yt-dlp fallback (slower but reliable)
-    const getStreamUrlFromYtDlp = (videoId: string): Promise<string> => {
+    // yt-dlp OPTIMIZED - uses Android client (skips slow signature deciphering)
+    // Expected speed: ~2-5 seconds instead of 15-20 seconds
+    const getStreamUrl = (videoId: string): Promise<string> => {
         return new Promise((resolve, reject) => {
-            const proc = spawn('yt-dlp', ['-g', '-f', 'bestaudio[ext=m4a]/bestaudio/best', '--no-playlist', '--no-warnings', `https://www.youtube.com/watch?v=${videoId}`]);
+            const proc = spawn('yt-dlp', [
+                '-g',                                                    // Get URL only
+                '-f', 'bestaudio',                                       // Best audio format
+                '--extractor-args', 'youtube:player_client=android',     // Android client = FAST
+                '--no-playlist',                                         // Single video only
+                '--skip-download',                                       // Don't download
+                '--quiet',                                               // No progress
+                '--no-warnings',                                         // No warnings
+                '--socket-timeout', '5',                                 // 5 second timeout
+                `https://www.youtube.com/watch?v=${videoId}`
+            ]);
             let out = '';
-            const t = setTimeout(() => { proc.kill(); reject(new Error('yt-dlp timeout')); }, 30000);
+            const t = setTimeout(() => { proc.kill(); reject(new Error('yt-dlp timeout')); }, 15000);
             proc.stdout.on('data', (d: Buffer) => out += d.toString());
-            proc.on('close', (c: number) => { clearTimeout(t); const u = out.trim().split('\n')[0]; c === 0 && u?.startsWith('http') ? resolve(u) : reject(new Error('yt-dlp failed')); });
+            proc.on('close', (c: number) => {
+                clearTimeout(t);
+                const u = out.trim().split('\n')[0];
+                c === 0 && u?.startsWith('http') ? resolve(u) : reject(new Error('yt-dlp failed'));
+            });
             proc.on('error', () => { clearTimeout(t); reject(new Error('yt-dlp error')); });
         });
     };
@@ -159,22 +154,14 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         const { videoId } = request.params as { videoId: string };
         if (!videoId || videoId === 'undefined') return reply.status(400).send({ error: 'Invalid video ID' });
 
-        // Try self-hosted Piped first (INSTANT: ~200-500ms)
         try {
-            const url = await getStreamUrlFromPiped(videoId);
-            server.log.info(`[Piped] ✓ ${videoId}`);
+            const start = Date.now();
+            const url = await getStreamUrl(videoId);
+            const elapsed = Date.now() - start;
+            server.log.info(`[yt-dlp] ✓ ${videoId} (${elapsed}ms)`);
             return { url };
         } catch (e: any) {
-            server.log.warn(`[Piped] ${e.message}`);
-        }
-
-        // Fallback to yt-dlp (slower but reliable)
-        try {
-            const url = await getStreamUrlFromYtDlp(videoId);
-            server.log.info(`[yt-dlp] ✓ ${videoId}`);
-            return { url };
-        } catch (e: any) {
-            server.log.error(`All providers failed: ${videoId}`);
+            server.log.error(`[yt-dlp] Failed: ${videoId} - ${e.message}`);
             return reply.status(500).send({ error: 'Failed to fetch stream' });
         }
     });
