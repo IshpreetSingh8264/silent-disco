@@ -135,20 +135,30 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
                 }
             });
 
-            // Get audio-only formats, sorted by bitrate
+            // Get audio-only formats
             const audioFormats = ytdl.filterFormats(info.formats, 'audioonly');
 
             if (audioFormats.length === 0) {
                 throw new Error('No audio formats available');
             }
 
+            // Prefer mp4/m4a formats for better browser compatibility (webm/opus has issues)
+            const preferredFormats = audioFormats.filter(f =>
+                f.container === 'mp4' ||
+                (f.mimeType && (f.mimeType.includes('mp4') || f.mimeType.includes('m4a')))
+            );
+
+            // Use preferred if available, otherwise fallback to any audio
+            const candidates = preferredFormats.length > 0 ? preferredFormats : audioFormats;
+
             // Sort by bitrate (highest first) and get the best one
-            const bestAudio = audioFormats.sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0))[0];
+            const bestAudio = candidates.sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0))[0];
 
             if (!bestAudio.url) {
                 throw new Error('No URL in audio format');
             }
 
+            server.log.info(`Selected format: ${bestAudio.container} ${bestAudio.audioBitrate}kbps`);
             return bestAudio.url;
         } catch (error: any) {
             throw new Error(`ytdl-core failed: ${error.message}`);
