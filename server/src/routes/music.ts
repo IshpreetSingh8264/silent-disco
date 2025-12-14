@@ -4,7 +4,7 @@ import YTMusic from 'ytmusic-api';
 import { spawn } from 'child_process';
 import path from 'path';
 import { redis } from '../services/redis';
-import ytdl from '@distube/ytdl-core';
+import play from 'play-dl';
 
 const musicRoutes: FastifyPluginAsync = async (server) => {
     const ytmusic = new YTMusic();
@@ -124,44 +124,43 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         }
     });
 
-    // Helper function to get stream URL via ytdl-core (faster than yt-dlp)
+    // Helper function to get stream URL via play-dl (handles decipher correctly)
     const getStreamUrl = async (videoId: string): Promise<string> => {
         try {
-            const info = await ytdl.getInfo(`https://www.youtube.com/watch?v=${videoId}`, {
-                requestOptions: {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                    }
-                }
-            });
+            const videoInfo = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`);
+
+            if (!videoInfo.format || videoInfo.format.length === 0) {
+                throw new Error('No formats available');
+            }
 
             // Get audio-only formats
-            const audioFormats = ytdl.filterFormats(info.formats, 'audioonly');
+            const audioFormats = videoInfo.format.filter(f =>
+                f.mimeType?.includes('audio') && !f.mimeType?.includes('video')
+            );
 
             if (audioFormats.length === 0) {
                 throw new Error('No audio formats available');
             }
 
-            // Prefer mp4/m4a formats for better browser compatibility (webm/opus has issues)
+            // Prefer mp4/m4a formats for browser compatibility
             const preferredFormats = audioFormats.filter(f =>
-                f.container === 'mp4' ||
-                (f.mimeType && (f.mimeType.includes('mp4') || f.mimeType.includes('m4a')))
+                f.mimeType?.includes('mp4') || f.mimeType?.includes('m4a')
             );
 
             // Use preferred if available, otherwise fallback to any audio
             const candidates = preferredFormats.length > 0 ? preferredFormats : audioFormats;
 
             // Sort by bitrate (highest first) and get the best one
-            const bestAudio = candidates.sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0))[0];
+            const bestAudio = candidates.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
 
             if (!bestAudio.url) {
                 throw new Error('No URL in audio format');
             }
 
-            server.log.info(`Selected format: ${bestAudio.container} ${bestAudio.audioBitrate}kbps`);
+            server.log.info(`Selected format: ${bestAudio.mimeType} ${Math.round((bestAudio.bitrate || 0) / 1000)}kbps`);
             return bestAudio.url;
         } catch (error: any) {
-            throw new Error(`ytdl-core failed: ${error.message}`);
+            throw new Error(`play-dl failed: ${error.message}`);
         }
     };
 
