@@ -292,6 +292,13 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         }
     });
 
+    // BACKWARD COMPATIBILITY: Alias /streams to /audio
+    // This allows existing frontend code to work while migrating
+    server.get('/streams/:videoId', async (request, reply) => {
+        const { videoId } = request.params as { videoId: string };
+        // Redirect to the new audio endpoint
+        return reply.redirect(`/api/music/audio/${videoId}`);
+    });
 
     server.get('/recommendations', { preValidation: [server.authenticate] }, async (request, reply) => {
         const schema = z.object({
