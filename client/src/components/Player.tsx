@@ -167,15 +167,32 @@ export const Player = () => {
             checkIfLiked();
             lastTrackedTime.current = 0;
 
-            // Get the video ID from the track
-            const videoId = currentTrack.pipedId || currentTrack.url?.split('/').pop();
+            // Get the video ID from the track - try multiple sources
+            let videoId = currentTrack.pipedId;
+            if (!videoId && currentTrack.url) {
+                // Extract from URL like /api/music/streams/VIDEO_ID
+                const urlParts = currentTrack.url.split('/');
+                videoId = urlParts[urlParts.length - 1];
+            }
+            if (!videoId) {
+                videoId = currentTrack.id;
+            }
 
-            if (videoId && videoId !== 'undefined') {
+            console.log('[Player] Track change:', {
+                title: currentTrack.title,
+                pipedId: currentTrack.pipedId,
+                url: currentTrack.url,
+                id: currentTrack.id,
+                extractedVideoId: videoId
+            });
+
+            if (videoId && videoId !== 'undefined' && !videoId.includes('undefined')) {
                 setIsLoadingStream(true);
                 setStreamUrl(null);
 
                 getStreamUrl(videoId)
                     .then(url => {
+                        console.log('[Player] Got stream URL:', url?.substring(0, 100) + '...');
                         setStreamUrl(url);
                         setIsLoadingStream(false);
                     })
@@ -184,11 +201,14 @@ export const Player = () => {
                         setIsLoadingStream(false);
                         toast.error('Failed to load audio');
                     });
+            } else {
+                console.warn('[Player] No valid videoId for track:', currentTrack.title);
+                setStreamUrl(null);
             }
         } else {
             setStreamUrl(null);
         }
-    }, [currentTrack?.pipedId, currentTrack?.url]);
+    }, [currentTrack?.pipedId, currentTrack?.url, currentTrack?.id]);
 
     useEffect(() => {
         if (audioRef.current) {
