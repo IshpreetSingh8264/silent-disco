@@ -125,11 +125,48 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
 
     // Piped instances for fallback (fast stream URL providers)
     const PIPED_INSTANCES = [
-        'https://pipedapi.kavin.rocks',
-        'https://pipedapi.tokhmi.xyz',
-        'https://pipedapi.moomoo.me',
-        'https://pipedapi.syncpundit.io',
+        'https://pipedapi.r4fo.com',
+        'https://api.piped.yt',
+        'https://pipedapi.darkness.services',
+        'https://pipedapi.drgns.space',
     ];
+
+    // Helper function to get stream URL via yt-dlp (slower but reliable)
+    const getStreamUrlWithYtDlp = async (videoId: string): Promise<string> => {
+        const ytDlpPath = path.join(process.cwd(), 'bin', 'yt-dlp');
+
+        return new Promise((resolve, reject) => {
+            const ytDlp = spawn(ytDlpPath, [
+                '-g',
+                '-f', 'bestaudio[ext=m4a]/bestaudio',
+                '--no-playlist',
+                `https://www.youtube.com/watch?v=${videoId}`
+            ]);
+
+            let output = '';
+            let error = '';
+
+            ytDlp.stdout.on('data', (data: Buffer) => {
+                output += data.toString();
+            });
+
+            ytDlp.stderr.on('data', (data: Buffer) => {
+                error += data.toString();
+            });
+
+            ytDlp.on('close', (code: number) => {
+                if (code === 0 && output.trim()) {
+                    resolve(output.trim().split('\n')[0]);
+                } else {
+                    reject(new Error(`yt-dlp failed: ${error}`));
+                }
+            });
+
+            ytDlp.on('error', (err: Error) => {
+                reject(err);
+            });
+        });
+    };
 
     server.get('/streams/:videoId', async (request, reply) => {
         const { videoId } = request.params as { videoId: string };
@@ -138,12 +175,16 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
             return reply.status(400).send({ error: 'Invalid video ID' });
         }
 
-        // Try Piped instances in order (much faster than yt-dlp)
+        // Try Piped instances first (much faster when available)
         for (const instance of PIPED_INSTANCES) {
             try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 3000);
+
                 const response = await fetch(`${instance}/streams/${videoId}`, {
-                    signal: AbortSignal.timeout(5000) // 5 second timeout
+                    signal: controller.signal
                 });
+                clearTimeout(timeout);
 
                 if (!response.ok) continue;
 
@@ -156,6 +197,7 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
                     .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))[0];
 
                 if (bestAudio?.url) {
+                    server.log.info(`Stream from ${instance} for ${videoId}`);
                     return reply.redirect(bestAudio.url);
                 }
 
@@ -165,11 +207,18 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
                 }
             } catch (err) {
                 // Try next instance
-                server.log.warn(`Piped instance ${instance} failed for ${videoId}`);
             }
         }
 
-        return reply.status(500).send({ error: 'Failed to fetch stream from all providers' });
+        // Fallback to yt-dlp if all Piped instances fail
+        try {
+            server.log.info(`Falling back to yt-dlp for ${videoId}`);
+            const streamUrl = await getStreamUrlWithYtDlp(videoId);
+            return reply.redirect(streamUrl);
+        } catch (err) {
+            server.log.error(`All stream providers failed for ${videoId}: ${err}`);
+            return reply.status(500).send({ error: 'Failed to fetch stream' });
+        }
     });
 
     server.get('/recommendations', { preValidation: [server.authenticate] }, async (request, reply) => {

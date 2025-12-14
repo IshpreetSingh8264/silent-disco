@@ -26,8 +26,12 @@ RUN npm run build
 # ==========================
 FROM node:20-alpine AS production
 
-# Install OpenSSL for Prisma engine (yt-dlp no longer needed - using Piped API)
-RUN apk add --no-cache openssl libc6-compat
+# Install OpenSSL for Prisma + Python/ffmpeg for yt-dlp fallback
+RUN apk add --no-cache openssl libc6-compat python3 ffmpeg curl && \
+    curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
+    chmod +x /usr/local/bin/yt-dlp && \
+    mkdir -p /app/bin && \
+    ln -s /usr/local/bin/yt-dlp /app/bin/yt-dlp
 
 WORKDIR /app
 
