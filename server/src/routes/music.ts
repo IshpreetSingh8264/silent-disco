@@ -126,13 +126,28 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
     server.get('/streams/:videoId', async (request, reply) => {
         const { videoId } = request.params as { videoId: string };
 
+        // Validate videoId
+        if (!videoId || videoId === 'undefined') {
+            return reply.status(400).send({ error: 'Invalid video ID' });
+        }
+
+        const cacheKey = `stream:${videoId}`;
+
         try {
+            // Check cache first
+            const cached = await redis.get(cacheKey);
+            if (cached) {
+                server.log.info(`[Stream] Cache hit for ${videoId}`);
+                return reply.redirect(cached);
+            }
+
+            server.log.info(`[Stream] Cache miss for ${videoId}, fetching with yt-dlp...`);
             const ytDlpPath = path.join(process.cwd(), 'bin', 'yt-dlp');
 
             const getStreamUrl = () => new Promise<string>((resolve, reject) => {
                 const ytDlp = spawn(ytDlpPath, [
                     '-g',
-                    '-f', 'bestaudio[ext=m4a]',
+                    '-f', 'bestaudio[ext=m4a]/bestaudio',
                     `https://www.youtube.com/watch?v=${videoId}`
                 ]);
 
@@ -154,9 +169,18 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
                         reject(new Error(`yt-dlp failed: ${error}`));
                     }
                 });
+
+                ytDlp.on('error', (err) => {
+                    reject(err);
+                });
             });
 
             const streamUrl = await getStreamUrl();
+
+            // Cache for 1 hour (YouTube URLs typically expire after ~6 hours)
+            await redis.set(cacheKey, streamUrl, 3600);
+            server.log.info(`[Stream] Cached stream URL for ${videoId}`);
+
             return reply.redirect(streamUrl);
 
         } catch (error) {
