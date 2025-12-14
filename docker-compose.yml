@@ -107,7 +107,7 @@ services:
   # Does NOT download - just returns direct YouTube CDN URLs
   # ===================
   piped:
-    image: 1337kavin/piped-backend:latest
+    image: 1337kavin/piped:latest
     container_name: silentdisco-piped
     restart: unless-stopped
     environment:
