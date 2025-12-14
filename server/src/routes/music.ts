@@ -123,64 +123,175 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         }
     });
 
-    // yt-dlp with specific client - returns Promise with URL
-    const ytdlpExtract = (videoId: string, useAndroid: boolean): Promise<string> => {
+    // ============================================
+    // TWO-PHASE AUDIO STREAMING
+    // Phase 1: Fast metadata with yt-dlp -j (~200-800ms)
+    // Phase 2: Byte-range proxy to YouTube CDN
+    // Supports: seeking, timeline, progress bar
+    // ============================================
+
+    interface AudioMetadata {
+        url: string;
+        contentLength: number;
+        duration: number;
+        mimeType: string;
+    }
+
+    // Get fast metadata using yt-dlp -j
+    const getAudioMetadata = async (videoId: string): Promise<AudioMetadata> => {
+        const cacheKey = `audio:meta:${videoId}`;
+
+        // Check Redis cache first
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+            return JSON.parse(cached);
+        }
+
         return new Promise((resolve, reject) => {
-            const args = [
-                '-g',
-                '-f', 'bestaudio/best',  // Fallback to 'best' if bestaudio unavailable
-                '--no-playlist', '--skip-download', '--no-warnings',
-                '--socket-timeout', '10',
-            ];
-            if (useAndroid) {
-                args.push('--extractor-args', 'youtube:player_client=android');
-            }
-            args.push(`https://www.youtube.com/watch?v=${videoId}`);
+            const proc = spawn('yt-dlp', [
+                '-j',                    // JSON output (fast, metadata only)
+                '--no-playlist',
+                '-f', 'bestaudio[ext=m4a]/bestaudio',
+                `https://www.youtube.com/watch?v=${videoId}`
+            ]);
 
-            const proc = spawn('yt-dlp', args);
-            let out = '', err = '';
-            const t = setTimeout(() => { proc.kill(); reject(new Error('timeout')); }, 15000);
+            let stdout = '';
+            let stderr = '';
+            const timeout = setTimeout(() => {
+                proc.kill();
+                reject(new Error('Metadata timeout'));
+            }, 10000);
 
-            proc.stdout.on('data', (d: Buffer) => out += d.toString());
-            proc.stderr.on('data', (d: Buffer) => err += d.toString());
-            proc.on('close', (code: number) => {
-                clearTimeout(t);
-                const url = out.trim().split('\n')[0];
-                if (code === 0 && url?.startsWith('http')) {
-                    resolve(url);
-                } else {
-                    reject(new Error(err.trim() || `exit code ${code}`));
+            proc.stdout.on('data', (d: Buffer) => stdout += d.toString());
+            proc.stderr.on('data', (d: Buffer) => stderr += d.toString());
+
+            proc.on('close', async (code: number) => {
+                clearTimeout(timeout);
+                if (code !== 0) {
+                    return reject(new Error(stderr || `Exit code ${code}`));
+                }
+
+                try {
+                    const info = JSON.parse(stdout);
+                    const format = info.requested_formats?.[0] || info;
+
+                    const metadata: AudioMetadata = {
+                        url: format.url,
+                        contentLength: format.filesize || format.filesize_approx || 0,
+                        duration: info.duration || 0,
+                        mimeType: format.acodec?.includes('mp4a') ? 'audio/mp4' : 'audio/webm'
+                    };
+
+                    // Cache for 5 minutes (YouTube URLs expire after ~6 hours)
+                    await redis.set(cacheKey, JSON.stringify(metadata), 300);
+                    resolve(metadata);
+                } catch (e: any) {
+                    reject(new Error(`Parse error: ${e.message}`));
                 }
             });
-            proc.on('error', (e) => { clearTimeout(t); reject(e); });
+
+            proc.on('error', (err) => {
+                clearTimeout(timeout);
+                reject(err);
+            });
         });
     };
 
-    server.get('/streams/:videoId', async (request, reply) => {
+    // Audio endpoint with byte-range proxy support
+    server.get('/audio/:videoId', async (request, reply) => {
         const { videoId } = request.params as { videoId: string };
-        if (!videoId || videoId === 'undefined') return reply.status(400).send({ error: 'Invalid video ID' });
 
-        const start = Date.now();
-
-        // Try Android client first (faster, ~2-5s)
-        try {
-            const url = await ytdlpExtract(videoId, true);
-            server.log.info(`[yt-dlp:android] ✓ ${videoId} (${Date.now() - start}ms)`);
-            return { url };
-        } catch (e: any) {
-            server.log.warn(`[yt-dlp:android] ${videoId} failed: ${e.message}`);
+        if (!videoId || videoId === 'undefined') {
+            return reply.status(400).send({ error: 'Invalid video ID' });
         }
 
-        // Fallback to default web client (slower but more compatible)
         try {
-            const url = await ytdlpExtract(videoId, false);
-            server.log.info(`[yt-dlp:web] ✓ ${videoId} (${Date.now() - start}ms)`);
-            return { url };
+            // Phase 1: Get metadata fast (~200-800ms)
+            const startTime = Date.now();
+            const metadata = await getAudioMetadata(videoId);
+            server.log.info(`[audio] Metadata: ${videoId} (${Date.now() - startTime}ms)`);
+
+            // Parse Range header if present
+            const rangeHeader = request.headers.range;
+            let start = 0;
+            let end = metadata.contentLength - 1;
+
+            if (rangeHeader && metadata.contentLength > 0) {
+                const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+                if (match) {
+                    start = match[1] ? parseInt(match[1], 10) : 0;
+                    end = match[2] ? parseInt(match[2], 10) : metadata.contentLength - 1;
+                }
+            }
+
+            const contentLength = end - start + 1;
+
+            // Phase 2: Proxy to YouTube CDN with Range support
+            const headers: Record<string, string> = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            };
+            if (rangeHeader) {
+                headers['Range'] = `bytes=${start}-${end}`;
+            }
+
+            const response = await fetch(metadata.url, { headers });
+
+            if (!response.ok) {
+                return reply.status(response.status).send({ error: 'Upstream error' });
+            }
+
+            // Set response headers
+            const statusCode = rangeHeader ? 206 : 200;
+            const responseHeaders: Record<string, string> = {
+                'Content-Type': metadata.mimeType,
+                'Accept-Ranges': 'bytes',
+                'Cache-Control': 'public, max-age=300'
+            };
+
+            if (metadata.contentLength > 0) {
+                responseHeaders['Content-Length'] = contentLength.toString();
+                if (rangeHeader) {
+                    responseHeaders['Content-Range'] = `bytes ${start}-${end}/${metadata.contentLength}`;
+                }
+            }
+
+            reply.raw.writeHead(statusCode, responseHeaders);
+
+            // Stream response body to client
+            const reader = response.body?.getReader();
+            if (!reader) {
+                return reply.raw.end();
+            }
+
+            let clientDisconnected = false;
+            request.raw.on('close', () => {
+                clientDisconnected = true;
+            });
+
+            const pump = async () => {
+                try {
+                    while (!clientDisconnected) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        reply.raw.write(value);
+                    }
+                } catch (e) {
+                    // Client disconnected
+                } finally {
+                    try { reader.cancel(); } catch (e) { /* ignore */ }
+                    try { reply.raw.end(); } catch (e) { /* ignore */ }
+                }
+            };
+
+            pump();
+            return reply;
+
         } catch (e: any) {
-            server.log.error(`[yt-dlp] All clients failed for ${videoId}: ${e.message}`);
-            return reply.status(500).send({ error: 'Failed to fetch stream' });
+            server.log.error(`[audio] Error: ${videoId} - ${e.message}`);
+            return reply.status(500).send({ error: 'Failed to get audio' });
         }
     });
+
 
     server.get('/recommendations', { preValidation: [server.authenticate] }, async (request, reply) => {
         const schema = z.object({

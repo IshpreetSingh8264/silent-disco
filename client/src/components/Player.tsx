@@ -10,7 +10,6 @@ import { Queue } from './Queue';
 import { AddToPlaylistModal } from './modals/AddToPlaylistModal';
 import { analytics } from '../services/analytics';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
-import { getStreamUrl } from '../services/streamService';
 import toast from 'react-hot-toast';
 
 export const Player = () => {
@@ -186,21 +185,13 @@ export const Player = () => {
                 extractedVideoId: videoId
             });
 
-            if (videoId && videoId !== 'undefined' && !videoId.includes('undefined')) {
-                setIsLoadingStream(true);
-                setStreamUrl(null);
 
-                getStreamUrl(videoId)
-                    .then(url => {
-                        console.log('[Player] Got stream URL:', url?.substring(0, 100) + '...');
-                        setStreamUrl(url);
-                        setIsLoadingStream(false);
-                    })
-                    .catch(err => {
-                        console.error('[Player] Failed to get stream URL:', err);
-                        setIsLoadingStream(false);
-                        toast.error('Failed to load audio');
-                    });
+            if (videoId && videoId !== 'undefined' && !videoId.includes('undefined')) {
+                // TWO-PHASE STREAMING - byte-range proxy with seeking support
+                const audioUrl = `/api/music/audio/${videoId}`;
+                console.log('[Player] Using audio endpoint:', audioUrl);
+                setStreamUrl(audioUrl);
+                setIsLoadingStream(false);
             } else {
                 console.warn('[Player] No valid videoId for track:', currentTrack.title);
                 setStreamUrl(null);
