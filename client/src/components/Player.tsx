@@ -10,6 +10,7 @@ import { Queue } from './Queue';
 import { AddToPlaylistModal } from './modals/AddToPlaylistModal';
 import { analytics } from '../services/analytics';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import { getStreamUrl } from '../services/streamService';
 import toast from 'react-hot-toast';
 
 export const Player = () => {
@@ -155,15 +156,39 @@ export const Player = () => {
 
     const { token } = useAuthStore();
     const [isLiked, setIsLiked] = useState(false);
+    const [streamUrl, setStreamUrl] = useState<string | null>(null);
+    const [isLoadingStream, setIsLoadingStream] = useState(false);
     const audioRef = useRef<HTMLAudioElement>(null);
     const lastTrackedTime = useRef(0);
 
+    // Fetch direct stream URL when track changes
     useEffect(() => {
         if (currentTrack) {
             checkIfLiked();
-            lastTrackedTime.current = 0; // Reset tracking on track change
+            lastTrackedTime.current = 0;
+
+            // Get the video ID from the track
+            const videoId = currentTrack.pipedId || currentTrack.url?.split('/').pop();
+
+            if (videoId && videoId !== 'undefined') {
+                setIsLoadingStream(true);
+                setStreamUrl(null);
+
+                getStreamUrl(videoId)
+                    .then(url => {
+                        setStreamUrl(url);
+                        setIsLoadingStream(false);
+                    })
+                    .catch(err => {
+                        console.error('[Player] Failed to get stream URL:', err);
+                        setIsLoadingStream(false);
+                        toast.error('Failed to load audio');
+                    });
+            }
+        } else {
+            setStreamUrl(null);
         }
-    }, [currentTrack]);
+    }, [currentTrack?.pipedId, currentTrack?.url]);
 
     useEffect(() => {
         if (audioRef.current) {
@@ -278,17 +303,26 @@ export const Player = () => {
     return (
         <>
             <div className={`fixed bottom-16 md:bottom-0 left-0 right-0 bg-retro-surface border-t border-white/10 z-50 transition-all duration-300 ${isExpanded ? 'h-screen bottom-0' : 'h-24'}`}>
-                {/* Hidden Audio Element */}
-                <audio
-                    ref={audioRef}
-                    src={currentTrack.url}
-                    onTimeUpdate={handleTimeUpdate}
-                    onEnded={playNext}
-                    onLoadedMetadata={(e) => {
-                        if (isPlaying) e.currentTarget.play().catch(console.error);
-                    }}
-                    onError={(e) => console.error("Audio error:", e.currentTarget.error, e.currentTarget.src)}
-                />
+                {/* Hidden Audio Element - only render when we have the direct stream URL */}
+                {streamUrl && (
+                    <audio
+                        ref={audioRef}
+                        src={streamUrl}
+                        onTimeUpdate={handleTimeUpdate}
+                        onEnded={playNext}
+                        onLoadedMetadata={(e) => {
+                            if (isPlaying) e.currentTarget.play().catch(console.error);
+                        }}
+                        onError={(e) => console.error("Audio error:", e.currentTarget.error, e.currentTarget.src)}
+                    />
+                )}
+
+                {/* Loading indicator when fetching stream URL */}
+                {isLoadingStream && (
+                    <div className="absolute top-0 left-0 right-0 h-1 bg-retro-primary/20 overflow-hidden">
+                        <div className="h-full bg-retro-primary animate-pulse w-full" />
+                    </div>
+                )}
 
                 {/* Expanded View Content */}
                 <AnimatePresence>

@@ -122,17 +122,8 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
             return reply.status(500).send({ error: 'Failed to fetch trending' });
         }
     });
-
-    // Piped instances for fallback (fast stream URL providers)
-    const PIPED_INSTANCES = [
-        'https://pipedapi.r4fo.com',
-        'https://api.piped.yt',
-        'https://pipedapi.darkness.services',
-        'https://pipedapi.drgns.space',
-    ];
-
-    // Helper function to get stream URL via yt-dlp (slower but reliable)
-    const getStreamUrlWithYtDlp = async (videoId: string): Promise<string> => {
+    // Helper function to get stream URL via yt-dlp
+    const getStreamUrl = async (videoId: string): Promise<string> => {
         const ytDlpPath = path.join(process.cwd(), 'bin', 'yt-dlp');
 
         return new Promise((resolve, reject) => {
@@ -175,48 +166,13 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
             return reply.status(400).send({ error: 'Invalid video ID' });
         }
 
-        // Try Piped instances first (much faster when available)
-        for (const instance of PIPED_INSTANCES) {
-            try {
-                const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 3000);
-
-                const response = await fetch(`${instance}/streams/${videoId}`, {
-                    signal: controller.signal
-                });
-                clearTimeout(timeout);
-
-                if (!response.ok) continue;
-
-                const data = await response.json() as any;
-
-                // Get best audio stream
-                const audioStreams = data.audioStreams || [];
-                const bestAudio = audioStreams
-                    .filter((s: any) => s.mimeType?.includes('audio'))
-                    .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-
-                if (bestAudio?.url) {
-                    server.log.info(`Stream from ${instance} for ${videoId}`);
-                    return reply.redirect(bestAudio.url);
-                }
-
-                // Fallback to HLS if no direct audio
-                if (data.hls) {
-                    return reply.redirect(data.hls);
-                }
-            } catch (err) {
-                // Try next instance
-            }
-        }
-
-        // Fallback to yt-dlp if all Piped instances fail
         try {
-            server.log.info(`Falling back to yt-dlp for ${videoId}`);
-            const streamUrl = await getStreamUrlWithYtDlp(videoId);
-            return reply.redirect(streamUrl);
+            server.log.info(`Fetching stream URL for ${videoId}`);
+            const streamUrl = await getStreamUrl(videoId);
+            // Return JSON with URL - client loads directly from YouTube CDN
+            return { url: streamUrl };
         } catch (err) {
-            server.log.error(`All stream providers failed for ${videoId}: ${err}`);
+            server.log.error(`Failed to get stream for ${videoId}: ${err}`);
             return reply.status(500).send({ error: 'Failed to fetch stream' });
         }
     });
