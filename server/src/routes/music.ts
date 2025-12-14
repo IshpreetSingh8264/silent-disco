@@ -123,70 +123,53 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         }
     });
 
+    // Piped instances for fallback (fast stream URL providers)
+    const PIPED_INSTANCES = [
+        'https://pipedapi.kavin.rocks',
+        'https://pipedapi.tokhmi.xyz',
+        'https://pipedapi.moomoo.me',
+        'https://pipedapi.syncpundit.io',
+    ];
+
     server.get('/streams/:videoId', async (request, reply) => {
         const { videoId } = request.params as { videoId: string };
 
-        // Validate videoId
         if (!videoId || videoId === 'undefined') {
             return reply.status(400).send({ error: 'Invalid video ID' });
         }
 
-        const cacheKey = `stream:${videoId}`;
+        // Try Piped instances in order (much faster than yt-dlp)
+        for (const instance of PIPED_INSTANCES) {
+            try {
+                const response = await fetch(`${instance}/streams/${videoId}`, {
+                    signal: AbortSignal.timeout(5000) // 5 second timeout
+                });
 
-        try {
-            // Check cache first
-            const cached = await redis.get(cacheKey);
-            if (cached) {
-                server.log.info(`[Stream] Cache hit for ${videoId}`);
-                return reply.redirect(cached);
+                if (!response.ok) continue;
+
+                const data = await response.json() as any;
+
+                // Get best audio stream
+                const audioStreams = data.audioStreams || [];
+                const bestAudio = audioStreams
+                    .filter((s: any) => s.mimeType?.includes('audio'))
+                    .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+
+                if (bestAudio?.url) {
+                    return reply.redirect(bestAudio.url);
+                }
+
+                // Fallback to HLS if no direct audio
+                if (data.hls) {
+                    return reply.redirect(data.hls);
+                }
+            } catch (err) {
+                // Try next instance
+                server.log.warn(`Piped instance ${instance} failed for ${videoId}`);
             }
-
-            server.log.info(`[Stream] Cache miss for ${videoId}, fetching with yt-dlp...`);
-            const ytDlpPath = path.join(process.cwd(), 'bin', 'yt-dlp');
-
-            const getStreamUrl = () => new Promise<string>((resolve, reject) => {
-                const ytDlp = spawn(ytDlpPath, [
-                    '-g',
-                    '-f', 'bestaudio[ext=m4a]/bestaudio',
-                    `https://www.youtube.com/watch?v=${videoId}`
-                ]);
-
-                let output = '';
-                let error = '';
-
-                ytDlp.stdout.on('data', (data) => {
-                    output += data.toString();
-                });
-
-                ytDlp.stderr.on('data', (data) => {
-                    error += data.toString();
-                });
-
-                ytDlp.on('close', (code) => {
-                    if (code === 0) {
-                        resolve(output.trim());
-                    } else {
-                        reject(new Error(`yt-dlp failed: ${error}`));
-                    }
-                });
-
-                ytDlp.on('error', (err) => {
-                    reject(err);
-                });
-            });
-
-            const streamUrl = await getStreamUrl();
-
-            // Cache for 1 hour (YouTube URLs typically expire after ~6 hours)
-            await redis.set(cacheKey, streamUrl, 3600);
-            server.log.info(`[Stream] Cached stream URL for ${videoId}`);
-
-            return reply.redirect(streamUrl);
-
-        } catch (error) {
-            server.log.error(error);
-            return reply.status(500).send({ error: 'Failed to fetch stream' });
         }
+
+        return reply.status(500).send({ error: 'Failed to fetch stream from all providers' });
     });
 
     server.get('/recommendations', { preValidation: [server.authenticate] }, async (request, reply) => {
