@@ -26,9 +26,15 @@ RUN npm run build
 # ==========================
 FROM node:20-alpine AS production
 
-# Install OpenSSL for Prisma + Python/pip for AI engine (no yt-dlp needed - using ytdl-core)
-RUN apk add --no-cache openssl libc6-compat python3 py3-pip && \
-    pip3 install --break-system-packages ytmusicapi
+# Install all required dependencies:
+# - OpenSSL for Prisma
+# - Python3 + pip for AI engine and yt-dlp
+# - ffmpeg for audio processing
+# - yt-dlp via pip (most reliable installation method)
+RUN apk add --no-cache openssl libc6-compat python3 py3-pip ffmpeg && \
+    pip3 install --break-system-packages ytmusicapi yt-dlp && \
+    # Verify yt-dlp is installed and working
+    yt-dlp --version
 
 WORKDIR /app
 

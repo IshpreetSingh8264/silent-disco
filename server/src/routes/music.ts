@@ -4,7 +4,6 @@ import YTMusic from 'ytmusic-api';
 import { spawn } from 'child_process';
 import path from 'path';
 import { redis } from '../services/redis';
-import play from 'play-dl';
 
 const musicRoutes: FastifyPluginAsync = async (server) => {
     const ytmusic = new YTMusic();
@@ -124,44 +123,53 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         }
     });
 
-    // Helper function to get stream URL via play-dl (handles decipher correctly)
-    const getStreamUrl = async (videoId: string): Promise<string> => {
-        try {
-            const videoInfo = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`);
+    // Helper function to get stream URL via yt-dlp (most reliable method)
+    // yt-dlp is installed via pip in Docker and available as system command
+    const getStreamUrl = (videoId: string): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            // Use 'yt-dlp' directly - installed globally via pip
+            const ytDlp = spawn('yt-dlp', [
+                '-g',                         // Get URL only (no download)
+                '-f', 'bestaudio[ext=m4a]/bestaudio/best',  // Best audio, prefer m4a
+                '--no-playlist',              // Don't expand playlists
+                '--no-warnings',              // Suppress warnings
+                '--socket-timeout', '15',     // 15 second socket timeout
+                `https://www.youtube.com/watch?v=${videoId}`
+            ]);
 
-            if (!videoInfo.format || videoInfo.format.length === 0) {
-                throw new Error('No formats available');
-            }
+            let output = '';
+            let error = '';
 
-            // Get audio-only formats
-            const audioFormats = videoInfo.format.filter(f =>
-                f.mimeType?.includes('audio') && !f.mimeType?.includes('video')
-            );
+            // Set timeout to kill process if it hangs
+            const timeout = setTimeout(() => {
+                ytDlp.kill('SIGTERM');
+                reject(new Error('yt-dlp timeout after 30 seconds'));
+            }, 30000);
 
-            if (audioFormats.length === 0) {
-                throw new Error('No audio formats available');
-            }
+            ytDlp.stdout.on('data', (data: Buffer) => {
+                output += data.toString();
+            });
 
-            // Prefer mp4/m4a formats for browser compatibility
-            const preferredFormats = audioFormats.filter(f =>
-                f.mimeType?.includes('mp4') || f.mimeType?.includes('m4a')
-            );
+            ytDlp.stderr.on('data', (data: Buffer) => {
+                error += data.toString();
+            });
 
-            // Use preferred if available, otherwise fallback to any audio
-            const candidates = preferredFormats.length > 0 ? preferredFormats : audioFormats;
+            ytDlp.on('close', (code: number) => {
+                clearTimeout(timeout);
+                const url = output.trim().split('\n')[0];
 
-            // Sort by bitrate (highest first) and get the best one
-            const bestAudio = candidates.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+                if (code === 0 && url && url.startsWith('http')) {
+                    resolve(url);
+                } else {
+                    reject(new Error(`yt-dlp failed (code ${code}): ${error || 'No URL returned'}`));
+                }
+            });
 
-            if (!bestAudio.url) {
-                throw new Error('No URL in audio format');
-            }
-
-            server.log.info(`Selected format: ${bestAudio.mimeType} ${Math.round((bestAudio.bitrate || 0) / 1000)}kbps`);
-            return bestAudio.url;
-        } catch (error: any) {
-            throw new Error(`play-dl failed: ${error.message}`);
-        }
+            ytDlp.on('error', (err: Error) => {
+                clearTimeout(timeout);
+                reject(new Error(`yt-dlp spawn error: ${err.message}`));
+            });
+        });
     };
 
     server.get('/streams/:videoId', async (request, reply) => {
@@ -174,10 +182,11 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         try {
             server.log.info(`Fetching stream URL for ${videoId}`);
             const streamUrl = await getStreamUrl(videoId);
-            // Return JSON with URL - client loads directly from YouTube CDN
+            server.log.info(`Got stream URL for ${videoId}`);
+            // Return JSON with direct YouTube CDN URL - client loads directly
             return { url: streamUrl };
-        } catch (err) {
-            server.log.error(`Failed to get stream for ${videoId}: ${err}`);
+        } catch (err: any) {
+            server.log.error(`Failed to get stream for ${videoId}: ${err.message}`);
             return reply.status(500).send({ error: 'Failed to fetch stream' });
         }
     });
