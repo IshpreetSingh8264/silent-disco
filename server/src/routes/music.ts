@@ -4,6 +4,7 @@ import YTMusic from 'ytmusic-api';
 import { spawn } from 'child_process';
 import path from 'path';
 import { redis } from '../services/redis';
+import ytdl from '@distube/ytdl-core';
 
 const musicRoutes: FastifyPluginAsync = async (server) => {
     const ytmusic = new YTMusic();
@@ -122,53 +123,36 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
             return reply.status(500).send({ error: 'Failed to fetch trending' });
         }
     });
-    // Helper function to get stream URL via yt-dlp
+
+    // Helper function to get stream URL via ytdl-core (faster than yt-dlp)
     const getStreamUrl = async (videoId: string): Promise<string> => {
-        const ytDlpPath = path.join(process.cwd(), 'bin', 'yt-dlp');
-
-        return new Promise((resolve, reject) => {
-            // Set a timeout to prevent hanging
-            const timeout = setTimeout(() => {
-                ytDlp.kill();
-                reject(new Error('yt-dlp timeout'));
-            }, 30000); // 30 second timeout
-
-            const ytDlp = spawn(ytDlpPath, [
-                '-g',                         // Get URL only
-                '-f', 'bestaudio[ext=m4a]/bestaudio',
-                '--no-playlist',
-                '-N', '8',                    // 8 parallel fragments for speed
-                '--no-check-certificate',    // Skip SSL verification
-                '--socket-timeout', '10',    // 10 second socket timeout
-                '--no-warnings',             // Suppress warnings
-                `https://www.youtube.com/watch?v=${videoId}`
-            ]);
-
-            let output = '';
-            let error = '';
-
-            ytDlp.stdout.on('data', (data: Buffer) => {
-                output += data.toString();
-            });
-
-            ytDlp.stderr.on('data', (data: Buffer) => {
-                error += data.toString();
-            });
-
-            ytDlp.on('close', (code: number) => {
-                clearTimeout(timeout);
-                if (code === 0 && output.trim()) {
-                    resolve(output.trim().split('\n')[0]);
-                } else {
-                    reject(new Error(`yt-dlp failed (code ${code}): ${error}`));
+        try {
+            const info = await ytdl.getInfo(`https://www.youtube.com/watch?v=${videoId}`, {
+                requestOptions: {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
                 }
             });
 
-            ytDlp.on('error', (err: Error) => {
-                clearTimeout(timeout);
-                reject(err);
-            });
-        });
+            // Get audio-only formats, sorted by bitrate
+            const audioFormats = ytdl.filterFormats(info.formats, 'audioonly');
+
+            if (audioFormats.length === 0) {
+                throw new Error('No audio formats available');
+            }
+
+            // Sort by bitrate (highest first) and get the best one
+            const bestAudio = audioFormats.sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0))[0];
+
+            if (!bestAudio.url) {
+                throw new Error('No URL in audio format');
+            }
+
+            return bestAudio.url;
+        } catch (error: any) {
+            throw new Error(`ytdl-core failed: ${error.message}`);
+        }
     };
 
     server.get('/streams/:videoId', async (request, reply) => {

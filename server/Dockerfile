@@ -57,9 +57,9 @@ ENV PORT=3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
 
-# Run as non-root
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001 && \
+# Run as non-root (without fixed UID/GID to avoid slow builds)
+RUN addgroup -S nodejs && \
+    adduser -S nodejs -G nodejs && \
     chown -R nodejs:nodejs /app
 USER nodejs
 
