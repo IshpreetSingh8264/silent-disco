@@ -123,30 +123,35 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         }
     });
 
-    // yt-dlp OPTIMIZED - uses Android client (skips slow signature deciphering)
-    // Expected speed: ~2-5 seconds instead of 15-20 seconds
-    const getStreamUrl = (videoId: string): Promise<string> => {
+    // yt-dlp with specific client - returns Promise with URL
+    const ytdlpExtract = (videoId: string, useAndroid: boolean): Promise<string> => {
         return new Promise((resolve, reject) => {
-            const proc = spawn('yt-dlp', [
-                '-g',                                                    // Get URL only
-                '-f', 'bestaudio',                                       // Best audio format
-                '--extractor-args', 'youtube:player_client=android',     // Android client = FAST
-                '--no-playlist',                                         // Single video only
-                '--skip-download',                                       // Don't download
-                '--quiet',                                               // No progress
-                '--no-warnings',                                         // No warnings
-                '--socket-timeout', '5',                                 // 5 second timeout
-                `https://www.youtube.com/watch?v=${videoId}`
-            ]);
-            let out = '';
-            const t = setTimeout(() => { proc.kill(); reject(new Error('yt-dlp timeout')); }, 15000);
+            const args = [
+                '-g', '-f', 'bestaudio',
+                '--no-playlist', '--skip-download', '--no-warnings',
+                '--socket-timeout', '10',
+            ];
+            if (useAndroid) {
+                args.push('--extractor-args', 'youtube:player_client=android');
+            }
+            args.push(`https://www.youtube.com/watch?v=${videoId}`);
+
+            const proc = spawn('yt-dlp', args);
+            let out = '', err = '';
+            const t = setTimeout(() => { proc.kill(); reject(new Error('timeout')); }, 15000);
+
             proc.stdout.on('data', (d: Buffer) => out += d.toString());
-            proc.on('close', (c: number) => {
+            proc.stderr.on('data', (d: Buffer) => err += d.toString());
+            proc.on('close', (code: number) => {
                 clearTimeout(t);
-                const u = out.trim().split('\n')[0];
-                c === 0 && u?.startsWith('http') ? resolve(u) : reject(new Error('yt-dlp failed'));
+                const url = out.trim().split('\n')[0];
+                if (code === 0 && url?.startsWith('http')) {
+                    resolve(url);
+                } else {
+                    reject(new Error(err.trim() || `exit code ${code}`));
+                }
             });
-            proc.on('error', () => { clearTimeout(t); reject(new Error('yt-dlp error')); });
+            proc.on('error', (e) => { clearTimeout(t); reject(e); });
         });
     };
 
@@ -154,14 +159,24 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         const { videoId } = request.params as { videoId: string };
         if (!videoId || videoId === 'undefined') return reply.status(400).send({ error: 'Invalid video ID' });
 
+        const start = Date.now();
+
+        // Try Android client first (faster, ~2-5s)
         try {
-            const start = Date.now();
-            const url = await getStreamUrl(videoId);
-            const elapsed = Date.now() - start;
-            server.log.info(`[yt-dlp] ✓ ${videoId} (${elapsed}ms)`);
+            const url = await ytdlpExtract(videoId, true);
+            server.log.info(`[yt-dlp:android] ✓ ${videoId} (${Date.now() - start}ms)`);
             return { url };
         } catch (e: any) {
-            server.log.error(`[yt-dlp] Failed: ${videoId} - ${e.message}`);
+            server.log.warn(`[yt-dlp:android] ${videoId} failed: ${e.message}`);
+        }
+
+        // Fallback to default web client (slower but more compatible)
+        try {
+            const url = await ytdlpExtract(videoId, false);
+            server.log.info(`[yt-dlp:web] ✓ ${videoId} (${Date.now() - start}ms)`);
+            return { url };
+        } catch (e: any) {
+            server.log.error(`[yt-dlp] All clients failed for ${videoId}: ${e.message}`);
             return reply.status(500).send({ error: 'Failed to fetch stream' });
         }
     });
