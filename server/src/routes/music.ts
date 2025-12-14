@@ -123,17 +123,24 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         }
     });
 
-    // Cobalt API - INSTANT stream URLs (~200-500ms)  
-    const getStreamUrlFromCobalt = async (videoId: string): Promise<string> => {
-        const res = await fetch('https://co.wuk.sh/api/json', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${videoId}`, aFormat: 'mp3', isAudioOnly: true })
+    // Self-hosted Piped API - INSTANT stream URLs (~200-500ms)
+    // Runs locally in Docker - always available, no external dependencies
+    const getStreamUrlFromPiped = async (videoId: string): Promise<string> => {
+        const res = await fetch(`http://piped:8080/streams/${videoId}`, {
+            headers: { 'Accept': 'application/json' }
         });
-        if (!res.ok) throw new Error(`Cobalt: ${res.status}`);
+        if (!res.ok) throw new Error(`Piped: ${res.status}`);
         const data = await res.json() as any;
-        if (data.status === 'error') throw new Error(`Cobalt: ${data.text}`);
-        return data.url || data.picker?.[0]?.url || (() => { throw new Error('Cobalt: No URL'); })();
+
+        // Get best audio stream
+        const audioStreams = data.audioStreams || [];
+        const bestAudio = audioStreams
+            .filter((s: any) => s.mimeType?.includes('audio'))
+            .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+
+        if (bestAudio?.url) return bestAudio.url;
+        if (data.hls) return data.hls;
+        throw new Error('Piped: No audio stream');
     };
 
     // yt-dlp fallback (slower but reliable)
@@ -152,16 +159,16 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         const { videoId } = request.params as { videoId: string };
         if (!videoId || videoId === 'undefined') return reply.status(400).send({ error: 'Invalid video ID' });
 
-        // Try Cobalt first (INSTANT)
+        // Try self-hosted Piped first (INSTANT: ~200-500ms)
         try {
-            const url = await getStreamUrlFromCobalt(videoId);
-            server.log.info(`[Cobalt] ✓ ${videoId}`);
+            const url = await getStreamUrlFromPiped(videoId);
+            server.log.info(`[Piped] ✓ ${videoId}`);
             return { url };
         } catch (e: any) {
-            server.log.warn(`[Cobalt] ${e.message}`);
+            server.log.warn(`[Piped] ${e.message}`);
         }
 
-        // Fallback to yt-dlp
+        // Fallback to yt-dlp (slower but reliable)
         try {
             const url = await getStreamUrlFromYtDlp(videoId);
             server.log.info(`[yt-dlp] ✓ ${videoId}`);

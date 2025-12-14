@@ -101,6 +101,28 @@ services:
     networks:
       - silentdisco-net
 
+  # ===================
+  # Piped Backend (YouTube Stream URL API)
+  # Provides INSTANT (~200-500ms) stream URL extraction
+  # Does NOT download - just returns direct YouTube CDN URLs
+  # ===================
+  piped:
+    image: 1337kavin/piped-backend:latest
+    container_name: silentdisco-piped
+    restart: unless-stopped
+    environment:
+      # Piped configuration
+      PROXY_PART: "https://pipedproxy.kavin.rocks"
+      DISABLE_REGISTRATION: "true"
+      API_URL: "http://piped:8080"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+    networks:
+      - silentdisco-net
 volumes:
   postgres_data:
     driver: local
