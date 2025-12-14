@@ -123,70 +123,51 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         }
     });
 
-    // Helper function to get stream URL via yt-dlp (most reliable method)
-    // yt-dlp is installed via pip in Docker and available as system command
-    const getStreamUrl = (videoId: string): Promise<string> => {
+    // Cobalt API - INSTANT stream URLs (~200-500ms)  
+    const getStreamUrlFromCobalt = async (videoId: string): Promise<string> => {
+        const res = await fetch('https://co.wuk.sh/api/json', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${videoId}`, aFormat: 'mp3', isAudioOnly: true })
+        });
+        if (!res.ok) throw new Error(`Cobalt: ${res.status}`);
+        const data = await res.json() as any;
+        if (data.status === 'error') throw new Error(`Cobalt: ${data.text}`);
+        return data.url || data.picker?.[0]?.url || (() => { throw new Error('Cobalt: No URL'); })();
+    };
+
+    // yt-dlp fallback (slower but reliable)
+    const getStreamUrlFromYtDlp = (videoId: string): Promise<string> => {
         return new Promise((resolve, reject) => {
-            // Use 'yt-dlp' directly - installed globally via pip
-            const ytDlp = spawn('yt-dlp', [
-                '-g',                         // Get URL only (no download)
-                '-f', 'bestaudio[ext=m4a]/bestaudio/best',  // Best audio, prefer m4a
-                '--no-playlist',              // Don't expand playlists
-                '--no-warnings',              // Suppress warnings
-                '--socket-timeout', '15',     // 15 second socket timeout
-                `https://www.youtube.com/watch?v=${videoId}`
-            ]);
-
-            let output = '';
-            let error = '';
-
-            // Set timeout to kill process if it hangs
-            const timeout = setTimeout(() => {
-                ytDlp.kill('SIGTERM');
-                reject(new Error('yt-dlp timeout after 30 seconds'));
-            }, 30000);
-
-            ytDlp.stdout.on('data', (data: Buffer) => {
-                output += data.toString();
-            });
-
-            ytDlp.stderr.on('data', (data: Buffer) => {
-                error += data.toString();
-            });
-
-            ytDlp.on('close', (code: number) => {
-                clearTimeout(timeout);
-                const url = output.trim().split('\n')[0];
-
-                if (code === 0 && url && url.startsWith('http')) {
-                    resolve(url);
-                } else {
-                    reject(new Error(`yt-dlp failed (code ${code}): ${error || 'No URL returned'}`));
-                }
-            });
-
-            ytDlp.on('error', (err: Error) => {
-                clearTimeout(timeout);
-                reject(new Error(`yt-dlp spawn error: ${err.message}`));
-            });
+            const proc = spawn('yt-dlp', ['-g', '-f', 'bestaudio[ext=m4a]/bestaudio/best', '--no-playlist', '--no-warnings', `https://www.youtube.com/watch?v=${videoId}`]);
+            let out = '';
+            const t = setTimeout(() => { proc.kill(); reject(new Error('yt-dlp timeout')); }, 30000);
+            proc.stdout.on('data', (d: Buffer) => out += d.toString());
+            proc.on('close', (c: number) => { clearTimeout(t); const u = out.trim().split('\n')[0]; c === 0 && u?.startsWith('http') ? resolve(u) : reject(new Error('yt-dlp failed')); });
+            proc.on('error', () => { clearTimeout(t); reject(new Error('yt-dlp error')); });
         });
     };
 
     server.get('/streams/:videoId', async (request, reply) => {
         const { videoId } = request.params as { videoId: string };
+        if (!videoId || videoId === 'undefined') return reply.status(400).send({ error: 'Invalid video ID' });
 
-        if (!videoId || videoId === 'undefined') {
-            return reply.status(400).send({ error: 'Invalid video ID' });
+        // Try Cobalt first (INSTANT)
+        try {
+            const url = await getStreamUrlFromCobalt(videoId);
+            server.log.info(`[Cobalt] ✓ ${videoId}`);
+            return { url };
+        } catch (e: any) {
+            server.log.warn(`[Cobalt] ${e.message}`);
         }
 
+        // Fallback to yt-dlp
         try {
-            server.log.info(`Fetching stream URL for ${videoId}`);
-            const streamUrl = await getStreamUrl(videoId);
-            server.log.info(`Got stream URL for ${videoId}`);
-            // Return JSON with direct YouTube CDN URL - client loads directly
-            return { url: streamUrl };
-        } catch (err: any) {
-            server.log.error(`Failed to get stream for ${videoId}: ${err.message}`);
+            const url = await getStreamUrlFromYtDlp(videoId);
+            server.log.info(`[yt-dlp] ✓ ${videoId}`);
+            return { url };
+        } catch (e: any) {
+            server.log.error(`All providers failed: ${videoId}`);
             return reply.status(500).send({ error: 'Failed to fetch stream' });
         }
     });
