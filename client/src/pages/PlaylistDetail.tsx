@@ -3,6 +3,7 @@ import { useParams, useLocation, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { usePlayerStore, type Track } from '../store/usePlayerStore';
 import { Play, Clock, Heart, Trash2 } from 'lucide-react';
+import { API_BASE_URL } from '../config/api';
 
 export const PlaylistDetail = () => {
     const { id } = useParams();
@@ -33,7 +34,7 @@ export const PlaylistDetail = () => {
                 : `/api/library/playlists/${id}`;
 
         try {
-            const res = await fetch(endpoint, {
+            const res = await fetch(`${API_BASE_URL}${endpoint}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
 
@@ -90,7 +91,7 @@ export const PlaylistDetail = () => {
         e.stopPropagation();
         if (!confirm('Remove this song from playlist?')) return;
         try {
-            await fetch(`http://localhost:3000/api/library/playlists/${id}/tracks/${trackId}`, {
+            await fetch(`${API_BASE_URL}/api/library/playlists/${id}/tracks/${trackId}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -103,7 +104,7 @@ export const PlaylistDetail = () => {
     const deletePlaylist = async () => {
         if (!confirm('Delete this playlist?')) return;
         try {
-            await fetch(`http://localhost:3000/api/library/playlists/${id}`, {
+            await fetch(`${API_BASE_URL}/api/library/playlists/${id}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` }
             });

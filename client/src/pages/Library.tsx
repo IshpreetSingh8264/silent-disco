@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { Link } from 'react-router-dom';
 import { Heart, Music, Plus, Trash2 } from 'lucide-react';
+import { API_BASE_URL } from '../config/api';
 
 interface Playlist {
     id: string;
@@ -22,7 +23,7 @@ export const Library = () => {
 
     const fetchPlaylists = async () => {
         try {
-            const res = await fetch('http://localhost:3000/api/library/playlists', {
+            const res = await fetch(`${API_BASE_URL}/api/library/playlists`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             const data = await res.json();
@@ -36,7 +37,7 @@ export const Library = () => {
         e.preventDefault();
         setError('');
         try {
-            const res = await fetch('http://localhost:3000/api/library/playlists', {
+            const res = await fetch(`${API_BASE_URL}/api/library/playlists`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -62,7 +63,7 @@ export const Library = () => {
     const deletePlaylist = async (id: string) => {
         if (!confirm('Are you sure you want to delete this playlist?')) return;
         try {
-            await fetch(`http://localhost:3000/api/library/playlists/${id}`, {
+            await fetch(`${API_BASE_URL}/api/library/playlists/${id}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` }
             });

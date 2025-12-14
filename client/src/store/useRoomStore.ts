@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
 import { useAuthStore } from './useAuthStore';
+import { SOCKET_URL } from '../config/api';
 
 export interface RoomMember {
     id: string;
@@ -84,7 +85,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
         console.log(`[RoomStore] Connecting to room ${roomCode}`);
 
-        const socket = io('/', {
+        const socket = io(SOCKET_URL || '/', {
             auth: { token },
             transports: ['websocket', 'polling']
         });

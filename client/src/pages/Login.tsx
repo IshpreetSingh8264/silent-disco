@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { useNavigate } from 'react-router-dom';
+import { API_BASE_URL } from '../config/api';
 
 export const Login = () => {
     const [isLogin, setIsLogin] = useState(true);
@@ -50,7 +51,7 @@ export const Login = () => {
                 ? { email, password }
                 : { email, username, password };
 
-            const res = await fetch(`http://localhost:3000${endpoint}`, {
+            const res = await fetch(`${API_BASE_URL}${endpoint}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),

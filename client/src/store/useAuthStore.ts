@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
+import { SOCKET_URL } from '../config/api';
 
 interface User {
     id: string;
@@ -37,7 +38,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     initializeSocket: () => {
         const { token, socket } = get();
         if (token && !socket) {
-            const newSocket = io('http://localhost:3000', {
+            const newSocket = io(SOCKET_URL || '/', {
                 auth: { token },
             });
             set({ socket: newSocket });
