@@ -127,10 +127,20 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
         const ytDlpPath = path.join(process.cwd(), 'bin', 'yt-dlp');
 
         return new Promise((resolve, reject) => {
+            // Set a timeout to prevent hanging
+            const timeout = setTimeout(() => {
+                ytDlp.kill();
+                reject(new Error('yt-dlp timeout'));
+            }, 30000); // 30 second timeout
+
             const ytDlp = spawn(ytDlpPath, [
-                '-g',
+                '-g',                         // Get URL only
                 '-f', 'bestaudio[ext=m4a]/bestaudio',
                 '--no-playlist',
+                '-N', '8',                    // 8 parallel fragments for speed
+                '--no-check-certificate',    // Skip SSL verification
+                '--socket-timeout', '10',    // 10 second socket timeout
+                '--no-warnings',             // Suppress warnings
                 `https://www.youtube.com/watch?v=${videoId}`
             ]);
 
@@ -146,14 +156,16 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
             });
 
             ytDlp.on('close', (code: number) => {
+                clearTimeout(timeout);
                 if (code === 0 && output.trim()) {
                     resolve(output.trim().split('\n')[0]);
                 } else {
-                    reject(new Error(`yt-dlp failed: ${error}`));
+                    reject(new Error(`yt-dlp failed (code ${code}): ${error}`));
                 }
             });
 
             ytDlp.on('error', (err: Error) => {
+                clearTimeout(timeout);
                 reject(err);
             });
         });
