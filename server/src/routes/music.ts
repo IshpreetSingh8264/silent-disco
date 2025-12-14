@@ -127,7 +127,8 @@ const musicRoutes: FastifyPluginAsync = async (server) => {
     const ytdlpExtract = (videoId: string, useAndroid: boolean): Promise<string> => {
         return new Promise((resolve, reject) => {
             const args = [
-                '-g', '-f', 'bestaudio',
+                '-g',
+                '-f', 'bestaudio/best',  // Fallback to 'best' if bestaudio unavailable
                 '--no-playlist', '--skip-download', '--no-warnings',
                 '--socket-timeout', '10',
             ];
